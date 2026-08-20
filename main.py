@@ -61,6 +61,11 @@ COLOR_LINE = (180, 180, 180)
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_IMAGE = BASE_DIR / "final_post.jpg"
+OUTPUT_STORY = BASE_DIR / "final_story.jpg"
+STORY_WIDTH = 1080
+STORY_HEIGHT = 1920
+STORY_MARGIN_X = 120
+STORY_START_Y = 700
 FONT_PATH = BASE_DIR / "font.ttf"
 FONT_DISPLAY_PATHS = (
     BASE_DIR / "FodaDisplay-Regular.otf",
@@ -1250,6 +1255,38 @@ def publish_to_instagram(image_url: str, caption: str) -> str:
     except Exception as exc:
         logger.exception("Instagram publishing failed")
         raise RuntimeError("Instagram publishing failed") from exc
+
+
+def create_story_media_container(image_url: str, account_id: str) -> str:
+    """Step 1: Create Instagram Story media container."""
+    logger.info("Creating Instagram Story media container...")
+    data = _graph_request(
+        "POST",
+        f"{account_id}/media",
+        data={
+            "image_url": image_url,
+            "media_type": "STORIES",
+        },
+    )
+    creation_id = data.get("id")
+    if not creation_id:
+        raise RuntimeError("Story container response missing creation id")
+    logger.info("Story container created — id: %s", creation_id)
+    return creation_id
+
+
+def publish_story_to_instagram(image_url: str) -> str:
+    """Full Instagram Story publishing sequence."""
+    try:
+        account_id = _resolve_instagram_account_id()
+        api_mode = "Instagram Login API" if _uses_instagram_login_api() else "Facebook Graph API"
+        logger.info("Using %s for Story publishing", api_mode)
+        container_id = create_story_media_container(image_url, account_id)
+        wait_for_container_ready(container_id)
+        return publish_media(container_id, account_id)
+    except Exception as exc:
+        logger.exception("Instagram Story publishing failed")
+        raise RuntimeError("Instagram Story publishing failed") from exc
 
 
 # ---------------------------------------------------------------------------

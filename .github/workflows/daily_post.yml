@@ -1,23 +1,27 @@
-name: Daily Instagram Automation
+name: Daily Instagram Automation (Post & Story)
 
 on:
   schedule:
-    # Cron Zamanlaması: Her gün UTC ile 17:00 (Türkiye Saati ile 20:00)
+    # 1. Her gün UTC 07:00 (Türkiye saati 10:00) -> Story
+    - cron: '0 7 * * *'
+    # 2. Her gün UTC 17:00 (Türkiye saati 20:00) -> Feed Post
     - cron: '0 17 * * *'
 
-  # İstediğiniz zaman GitHub panelinden manuel çalıştırmak için buton ekler
   workflow_dispatch:
 
+concurrency:
+  group: sentiment-club-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
-  run-automation:
+  run-story:
+    if: github.event.schedule == '0 7 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Proje dosyalarını bulut sunucuya çek
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Son 30 kelime geçmişini önceki çalışmalardan geri yükle
       - name: Restore word history cache
         uses: actions/cache@v4
         with:
@@ -25,13 +29,11 @@ jobs:
           key: word-history-${{ github.ref_name }}
           save-always: true
 
-      # 3. Python ortamını kur
       - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      # 4. Gerekli kütüphaneleri ve Türkçe/Asya font desteklerini yükle
       - name: Install dependencies & fonts
         run: |
           sudo apt-get update
@@ -39,9 +41,41 @@ jobs:
           python -m pip install --upgrade pip
           pip install google-genai pillow requests python-dotenv
 
-      # 5. Kodunuzu çalıştır ve Instagram'a gönder
-      #    (başarılı yayın sonrası word_history.json güncellenir; cache job sonunda saklanır)
-      - name: Run Main Script
+      - name: Run Story Automation
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+          INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+        run: python story.py
+
+  run-post:
+    if: github.event.schedule == '0 17 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Restore word history cache
+        uses: actions/cache@v4
+        with:
+          path: word_history.json
+          key: word-history-${{ github.ref_name }}
+          save-always: true
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies & fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+          python -m pip install --upgrade pip
+          pip install google-genai pillow requests python-dotenv
+
+      - name: Run Main Post Automation
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
