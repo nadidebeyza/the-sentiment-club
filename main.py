@@ -15,6 +15,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +56,7 @@ MARGIN_X = 130
 DICT_START_Y = 480
 COLOR_WHITE = (255, 255, 255)
 COLOR_TEXT = (20, 20, 20)
+COLOR_WORD = (0x7D, 0x0B, 0x1F)  # #7d0b1f — main headword
 COLOR_LINE = (180, 180, 180)
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -72,6 +74,9 @@ WATERMARK_FONT_SIZE = 38
 
 POLL_INTERVAL_SECONDS = 5
 POLL_MAX_WAIT_SECONDS = 30
+WORD_HISTORY_PATH = BASE_DIR / "word_history.json"
+WORD_HISTORY_SIZE = int(os.getenv("WORD_HISTORY_SIZE", "30"))
+DUPLICATE_CONTENT_RETRIES = int(os.getenv("DUPLICATE_CONTENT_RETRIES", "5"))
 
 CONTENT_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -200,8 +205,11 @@ Rules:
 - caption MUST be plain text only — never use markdown (**bold**, *italic*, etc.)
 - caption MUST NOT use ALL CAPS words or lines for emphasis — use sentence case
 - hashtags MUST be exactly 15, all lowercase, with no # prefix in the JSON array
+- NEVER repeat any concept listed in the "Recently published — DO NOT REUSE" section
 - Output ONLY valid JSON matching the schema — no markdown, no commentary
 """
+
+GEMINI_SYSTEM_PROMPT_BASE = GEMINI_SYSTEM_PROMPT
 
 logging.basicConfig(
     level=logging.INFO,
@@ -617,9 +625,81 @@ def _is_transient_gemini_error(exc: Exception) -> bool:
     return any(token in message for token in ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED"))
 
 
-def generate_content() -> PostContent:
-    """Call Gemini and return validated post content."""
-    client = genai.Client(api_key=GEMINI_API_KEY)
+def load_word_history() -> list[dict[str, str]]:
+    """Load the rolling list of recently published concepts."""
+    if not WORD_HISTORY_PATH.exists():
+        return []
+    try:
+        payload = json.loads(WORD_HISTORY_PATH.read_text(encoding="utf-8"))
+        entries = payload.get("entries", [])
+        if isinstance(entries, list):
+            return entries[-WORD_HISTORY_SIZE:]
+    except (OSError, json.JSONDecodeError, TypeError):
+        logger.warning("Word history file unreadable — starting with empty history")
+    return []
+
+
+def save_word_history(entries: list[dict[str, str]]) -> None:
+    """Persist the most recent N published concepts."""
+    trimmed = entries[-WORD_HISTORY_SIZE:]
+    WORD_HISTORY_PATH.write_text(
+        json.dumps({"entries": trimmed}, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def is_duplicate_content(content: PostContent, history: list[dict[str, str]]) -> bool:
+    """Return True if this headword or subtitle was published recently."""
+    headword = _normalize_headword(content.word)
+    subtitle = content.subtitle.strip()
+    for entry in history:
+        if _normalize_headword(entry.get("word", "")) == headword:
+            return True
+        if entry.get("subtitle", "").strip() == subtitle:
+            return True
+    return False
+
+
+def record_published_word(content: PostContent) -> None:
+    """Append a successful publish to rolling word history."""
+    history = load_word_history()
+    history.append(
+        {
+            "word": content.word,
+            "subtitle": content.subtitle,
+            "published_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    save_word_history(history)
+    logger.info(
+        "Word history updated (%s/%s tracked): %s",
+        min(len(history), WORD_HISTORY_SIZE),
+        WORD_HISTORY_SIZE,
+        content.word,
+    )
+
+
+def build_gemini_prompt(history: list[dict[str, str]], *, duplicate_retry: bool = False) -> str:
+    """Build Gemini prompt with a banned list of recent concepts."""
+    prompt = GEMINI_SYSTEM_PROMPT_BASE
+    if history:
+        prompt += (
+            f"\n\nRecently published — DO NOT REUSE any of these last "
+            f"{len(history)} concepts:\n"
+        )
+        for entry in history:
+            prompt += f"- {entry.get('word')} ({entry.get('subtitle', '')})\n"
+        prompt += "Pick a completely different, fresh concept not on this list."
+    if duplicate_retry:
+        prompt += (
+            "\nYour previous answer duplicated a banned concept. "
+            "Generate something entirely new that is NOT similar in meaning or spelling."
+        )
+    return prompt
+
+
+def _call_gemini_for_content(client: genai.Client, prompt: str) -> PostContent:
+    """Call Gemini models with retries and return validated post content."""
     config = types.GenerateContentConfig(
         temperature=0.9,
         response_mime_type="application/json",
@@ -638,7 +718,7 @@ def generate_content() -> PostContent:
                 )
                 response = client.models.generate_content(
                     model=model,
-                    contents=GEMINI_SYSTEM_PROMPT,
+                    contents=prompt,
                     config=config,
                 )
                 raw = response.text
@@ -647,15 +727,16 @@ def generate_content() -> PostContent:
                 data = json.loads(raw)
                 content = PostContent.from_dict(data)
                 content = _ensure_phonetic(client, content, model)
-                logger.info(
-                    "[✓] Gemini Content Generated — concept: %s (%s)",
-                    content.word,
-                    _format_phonetic_line(content),
-                )
                 return content
             except json.JSONDecodeError as exc:
                 logger.exception("Gemini returned invalid JSON")
                 raise RuntimeError("Failed to parse Gemini JSON output") from exc
+            except ValueError as exc:
+                if "Invalid headword" in str(exc) or "Expected 15 hashtags" in str(exc):
+                    logger.warning("Content validation failed: %s", exc)
+                    last_error = exc
+                    break
+                raise
             except genai.errors.ClientError as exc:
                 if "API key not valid" in str(exc) or "API_KEY_INVALID" in str(exc):
                     raise RuntimeError(
@@ -696,6 +777,43 @@ def generate_content() -> PostContent:
         "Gemini is temporarily unavailable (503 high demand). "
         "Wait a minute and run again, or set GEMINI_MODEL to a fallback in .env."
     ) from last_error
+
+
+def generate_content() -> PostContent:
+    """Call Gemini and return a unique post concept not in recent history."""
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    history = load_word_history()
+    if history:
+        logger.info("Avoiding %s recent concepts from word history", len(history))
+
+    for duplicate_attempt in range(1, DUPLICATE_CONTENT_RETRIES + 1):
+        prompt = build_gemini_prompt(
+            history,
+            duplicate_retry=duplicate_attempt > 1,
+        )
+        content = _call_gemini_for_content(client, prompt)
+
+        if is_duplicate_content(content, history):
+            logger.warning(
+                "Duplicate concept blocked: %s (%s) — regenerating (%s/%s)",
+                content.word,
+                content.subtitle,
+                duplicate_attempt,
+                DUPLICATE_CONTENT_RETRIES,
+            )
+            continue
+
+        logger.info(
+            "[✓] Gemini Content Generated — concept: %s (%s)",
+            content.word,
+            _format_phonetic_line(content),
+        )
+        return content
+
+    raise RuntimeError(
+        f"Could not generate a unique concept after {DUPLICATE_CONTENT_RETRIES} attempts. "
+        f"Review {WORD_HISTORY_PATH.name} or increase DUPLICATE_CONTENT_RETRIES."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -905,7 +1023,7 @@ def create_post_image(content: PostContent) -> Path:
         draw = ImageDraw.Draw(canvas)
 
         font_kanji = _load_custom_font(60, is_kanji=True)
-        font_word = _load_custom_font(110)
+        font_word = _load_custom_font(110, display=True)
         font_meta = _load_custom_font(40, ipa=True)
         font_definition = _load_custom_font(34)
         font_watermark = _load_custom_font(WATERMARK_FONT_SIZE, display=True)
@@ -924,7 +1042,7 @@ def create_post_image(content: PostContent) -> Path:
             y,
             content.word,
             font_word,
-            COLOR_TEXT,
+            COLOR_WORD,
             max_width,
             line_spacing=6,
             lowercase=False,
@@ -1151,6 +1269,7 @@ def run_pipeline() -> None:
     image_path = create_post_image(content)
     public_url = host_image(image_path)
     media_id = publish_to_instagram(public_url, content.full_caption())
+    record_published_word(content)
 
     logger.info("=" * 60)
     logger.info("Pipeline complete!")
@@ -1228,6 +1347,20 @@ def lookup_instagram_account_id() -> None:
         )
 
 
+def show_word_history() -> None:
+    """Print recently published concepts tracked for duplicate avoidance."""
+    history = load_word_history()
+    if not history:
+        print(f"No entries in {WORD_HISTORY_PATH.name} yet.")
+        return
+    print(f"Last {len(history)} published concepts (max {WORD_HISTORY_SIZE}):")
+    for index, entry in enumerate(history, start=1):
+        print(
+            f"  {index:2}. {entry.get('word')} ({entry.get('subtitle', '')}) "
+            f"— {entry.get('published_at', 'unknown')}"
+        )
+
+
 def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "--lookup-ig-id":
         load_dotenv()
@@ -1237,6 +1370,11 @@ def main() -> int:
         except (EnvironmentError, RuntimeError) as exc:
             logger.error("%s", exc)
             return 1
+
+    if len(sys.argv) > 1 and sys.argv[1] == "--show-history":
+        load_dotenv()
+        show_word_history()
+        return 0
 
     try:
         run_pipeline()
