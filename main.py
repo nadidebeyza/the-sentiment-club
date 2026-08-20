@@ -187,7 +187,10 @@ VALID_IPA_PATTERN = re.compile(
 )
 MACRON_TO_ASCII = str.maketrans("āēīōūĀĒĪŌŪ", "aeiouAEIOU")
 HEADWORD_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-IPA_QUALITY_MARKERS = frozenset("ːˈˌɑæəɚɜɪɔʊʌθðʃʒŋɲɴɡᵻ")
+PHONETIC_META_PATTERN = re.compile(
+    r"^\[(?P<ipa>[^\]]+)\]\s*(?P<pos>[A-Za-z]+)\s*•\s*(?P<lang>.+)$"
+)
+IPA_QUALITY_MARKERS = frozenset("ːˈˌɑæəɚɜɪɔʊʌθðʃʒŋɲɴɡᵻɾɰ")
 
 GEMINI_SYSTEM_PROMPT = """You are the creative director for @thesentimentclub — an Instagram brand
 that explores philosophy, deep Japanese concepts, psychology, and the hidden
@@ -349,26 +352,54 @@ def _normalize_caption_text(caption: str) -> str:
     return _format_caption_paragraphs(_strip_markdown(caption.strip()))
 
 
+def _split_phonetic_blob(raw: str) -> tuple[str, str | None, str | None]:
+    """Extract IPA when Gemini mixes pronunciation with part-of-speech / language."""
+    text = raw.strip()
+    match = PHONETIC_META_PATTERN.match(text)
+    if match:
+        return (
+            match.group("ipa").strip(),
+            match.group("pos").strip(),
+            match.group("lang").strip(),
+        )
+
+    bracket_match = re.match(r"^\[(?P<ipa>[^\]]+)\](?:\s|$)", text)
+    if bracket_match:
+        return bracket_match.group("ipa").strip(), None, None
+
+    return text, None, None
+
+
+def _clean_ipa_symbols(ipa: str) -> str:
+    """Normalize IPA characters and spacing."""
+    cleaned = ipa.strip().strip("[]")
+    cleaned = cleaned.translate(MACRON_TO_IPA)
+    cleaned = cleaned.replace(":", "ː")
+    cleaned = cleaned.replace("ɽ", "ɾ")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = cleaned.replace("-", " ")
+    return cleaned.strip()
+
+
 def _normalize_ipa(raw: str) -> str:
     """Normalize IPA string to consistent dictionary-style notation."""
-    ipa = raw.strip().strip("[]")
-    ipa = ipa.translate(MACRON_TO_IPA)
-    ipa = ipa.replace(":", "ː")
-    ipa = re.sub(r"\s+", " ", ipa)
-    ipa = ipa.replace("-", " ")
-    return ipa.strip()
+    ipa, _, _ = _split_phonetic_blob(raw)
+    return _clean_ipa_symbols(ipa)
 
 
 def _is_valid_ipa(ipa: str) -> bool:
     """Return True when pronunciation looks like real IPA, not plain romanization."""
     cleaned = _normalize_ipa(ipa)
-    if len(cleaned) < 2 or not VALID_IPA_PATTERN.fullmatch(cleaned):
+    if not cleaned or len(cleaned) < 2:
+        return False
+    if any(token in cleaned for token in ("•", "[", "]", " noun", " verb", " concept")):
+        return False
+    if not VALID_IPA_PATTERN.fullmatch(cleaned):
         return False
     if any(marker in cleaned for marker in IPA_QUALITY_MARKERS):
         return True
     if "ː" in cleaned or "ˈ" in cleaned or "ˌ" in cleaned:
         return True
-    # Reject plain ASCII romanization such as "yugen" or "wabi sabi"
     return not re.fullmatch(r"[a-zA-Z\s'.-]+", cleaned)
 
 
@@ -379,32 +410,35 @@ def _normalize_part_of_speech(value: str) -> str:
 
 def _parse_legacy_phonetic_line(line: str) -> tuple[str, str, str]:
     """Parse legacy `[ipa] noun • Japanese` lines from older Gemini output."""
-    text = line.strip()
-    match = re.match(r"^\[(?P<ipa>[^\]]+)\]\s*(?P<pos>[A-Za-z]+)\s*•\s*(?P<lang>.+)$", text)
-    if match:
-        return (
-            match.group("ipa"),
-            _normalize_part_of_speech(match.group("pos")),
-            match.group("lang").strip(),
-        )
-    return text.strip("[]"), "noun", "Japanese"
+    ipa, pos, lang = _split_phonetic_blob(line.strip())
+    if pos and lang:
+        return _normalize_ipa(ipa), _normalize_part_of_speech(pos), lang.strip()
+    return _normalize_ipa(ipa), "noun", "Japanese"
 
 
 def _extract_phonetic_fields(data: dict[str, Any]) -> tuple[str, str, str]:
     """Read structured phonetic fields, with legacy viral_hook fallback."""
-    if data.get("phonetic_ipa"):
-        return (
-            data["phonetic_ipa"],
-            _normalize_part_of_speech(data.get("part_of_speech", "noun")),
-            data.get("origin_language", "Japanese").strip() or "Japanese",
-        )
+    pos = _normalize_part_of_speech(data.get("part_of_speech", "noun"))
+    language = data.get("origin_language", "Japanese").strip() or "Japanese"
+    headword = _normalize_headword(data.get("word", ""))
+
+    raw_ipa = str(data.get("phonetic_ipa", "")).strip()
+    if raw_ipa:
+        ipa_part, blob_pos, blob_lang = _split_phonetic_blob(raw_ipa)
+        ipa = _normalize_ipa(ipa_part)
+        if blob_pos:
+            pos = _normalize_part_of_speech(blob_pos)
+        if blob_lang:
+            language = blob_lang.strip() or language
+        if headword and ipa.replace(" ", "-") == headword:
+            ipa = ""
+        return ipa, pos, language
 
     legacy = data.get("viral_hook", "").strip()
     if legacy:
-        ipa, pos, lang = _parse_legacy_phonetic_line(legacy)
-        return ipa, pos, lang
+        return _parse_legacy_phonetic_line(legacy)
 
-    return data.get("word", "").strip(), "noun", "Japanese"
+    return "", pos, language
 
 
 def _format_phonetic_line(content: PostContent) -> str:
@@ -464,13 +498,22 @@ Examples:
 
 
 def _ensure_phonetic(client: genai.Client, content: PostContent, model: str) -> PostContent:
-    """Validate IPA; run a focused refinement pass when Gemini output is weak."""
-    content.phonetic_ipa = _normalize_ipa(content.phonetic_ipa)
+    """Validate IPA; run a focused refinement pass when Gemini output is weak or mixed."""
+    ipa_part, blob_pos, blob_lang = _split_phonetic_blob(content.phonetic_ipa)
+    content.phonetic_ipa = _normalize_ipa(ipa_part)
+    if blob_pos:
+        content.part_of_speech = _normalize_part_of_speech(blob_pos)
+    if blob_lang:
+        content.origin_language = blob_lang.strip() or content.origin_language
+    content.part_of_speech = _normalize_part_of_speech(content.part_of_speech)
+
     if _is_valid_ipa(content.phonetic_ipa):
-        content.part_of_speech = _normalize_part_of_speech(content.part_of_speech)
         return content
 
-    logger.warning("IPA looks inaccurate (%s) — refining with phonetician pass...", content.phonetic_ipa)
+    logger.warning(
+        "IPA looks inaccurate (%s) — refining with phonetician pass...",
+        content.phonetic_ipa or content.word,
+    )
     try:
         refined = _refine_phonetic(client, content, model)
         logger.info("[✓] IPA refined — %s", _format_phonetic_line(refined))
