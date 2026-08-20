@@ -1106,18 +1106,44 @@ BROWSER_USER_AGENT = (
 )
 
 
-def upload_to_catbox(image_path: Path) -> str:
-    """Upload image to catbox.moe and return direct HTTPS URL."""
-    logger.info("Uploading image to Catbox...")
-
-    # Cloudflare / 412 Precondition Failed engelini aşmak için User-Agent ekliyoruz
+def upload_to_tmpfiles(image_path: Path) -> str:
+    """Upload image to tmpfiles.org (no Cloudflare blocks, direct HTTPS URL)."""
+    logger.info("Uploading image to tmpfiles.org...")
     headers = {"User-Agent": BROWSER_USER_AGENT}
-
     try:
         with image_path.open("rb") as handle:
             response = requests.post(
-                "https://catbox.moe/user/api.php",
-                data={"reqtype": "fileupload"},
+                "https://tmpfiles.org/api/v1/upload",
+                files={"file": handle},
+                headers=headers,
+                timeout=60,
+            )
+        response.raise_for_status()
+        data = response.json()
+
+        # tmpfiles API yanıtındaki URL'yi direct image URL'e çeviriyoruz:
+        # 'https://tmpfiles.org/12345/final_post.jpg' -> 'https://tmpfiles.org/dl/12345/final_post.jpg'
+        raw_url = data["data"]["url"]
+        direct_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+        if not direct_url.startswith("https://"):
+            raise ValueError(f"Unexpected tmpfiles response: {raw_url[:200]}")
+
+        logger.info("[✓] Hosted at tmpfiles — %s", direct_url)
+        return direct_url
+    except (requests.RequestException, KeyError, TypeError, ValueError) as exc:
+        logger.exception("tmpfiles upload failed")
+        raise RuntimeError("tmpfiles upload failed") from exc
+
+
+def upload_to_litterbox(image_path: Path) -> str:
+    """Fallback: upload to Litterbox (Catbox temporary 1-hour hosting)."""
+    logger.info("Uploading image to Litterbox (fallback)...")
+    headers = {"User-Agent": BROWSER_USER_AGENT}
+    try:
+        with image_path.open("rb") as handle:
+            response = requests.post(
+                "https://litterbox.catbox.moe/resources/internals/api.php",
+                data={"reqtype": "fileupload", "time": "1h"},
                 files={"fileToUpload": (image_path.name, handle, "image/jpeg")},
                 headers=headers,
                 timeout=60,
@@ -1125,82 +1151,21 @@ def upload_to_catbox(image_path: Path) -> str:
         response.raise_for_status()
         url = response.text.strip()
         if not url.startswith("https://"):
-            raise ValueError(f"Unexpected Catbox response: {url[:200]}")
-        logger.info("[✓] Hosted at Catbox — %s", url)
+            raise ValueError(f"Unexpected Litterbox response: {url[:200]}")
+        logger.info("[✓] Hosted at Litterbox — %s", url)
         return url
     except (requests.RequestException, ValueError) as exc:
-        logger.exception("Catbox upload failed")
-        raise RuntimeError("Catbox upload failed") from exc
-
-
-def upload_to_0x0(image_path: Path) -> str:
-    """Fallback upload to 0x0.st — free, no API key required."""
-    logger.info("Uploading image to 0x0.st (fallback)...")
-    headers = {"User-Agent": BROWSER_USER_AGENT}
-    try:
-        with image_path.open("rb") as handle:
-            response = requests.post(
-                "https://0x0.st",
-                files={"file": (image_path.name, handle, "image/jpeg")},
-                headers=headers,
-                timeout=60,
-            )
-        response.raise_for_status()
-        url = response.text.strip()
-        if not url.startswith("https://"):
-            raise ValueError(f"Unexpected 0x0.st response: {url[:200]}")
-        logger.info("[✓] Hosted at 0x0.st — %s", url)
-        return url
-    except (requests.RequestException, ValueError) as exc:
-        logger.exception("0x0.st upload failed")
-        raise RuntimeError("0x0.st upload failed") from exc
-
-
-def upload_to_imgur(image_path: Path) -> str:
-    """Optional fallback upload to Imgur (requires IMGUR_CLIENT_ID)."""
-    if not IMGUR_CLIENT_ID:
-        raise RuntimeError("IMGUR_CLIENT_ID not set — cannot use Imgur fallback")
-    logger.info("Uploading image to Imgur (fallback)...")
-    headers = {"User-Agent": BROWSER_USER_AGENT}
-    try:
-        with image_path.open("rb") as handle:
-            response = requests.post(
-                "https://api.imgur.com/3/upload",
-                headers={
-                    "Authorization": f"Client-ID {IMGUR_CLIENT_ID}",
-                    **headers,
-                },
-                files={"image": handle},
-                timeout=60,
-            )
-        response.raise_for_status()
-        payload = response.json()
-        url = payload["data"]["link"]
-        logger.info("[✓] Hosted at Imgur — %s", url)
-        return url
-    except (requests.RequestException, KeyError, ValueError) as exc:
-        logger.exception("Imgur upload failed")
-        raise RuntimeError("Imgur upload failed") from exc
+        logger.exception("Litterbox upload failed")
+        raise RuntimeError("Litterbox upload failed") from exc
 
 
 def host_image(image_path: Path) -> str:
-    """Upload with Catbox primary, then free fallbacks (0x0.st, optional Imgur)."""
-    uploaders: list[tuple[str, Any]] = [
-        ("Catbox", upload_to_catbox),
-        ("0x0.st", upload_to_0x0),
-    ]
-    if IMGUR_CLIENT_ID:
-        uploaders.append(("Imgur", upload_to_imgur))
-
-    errors: list[str] = []
-    for name, upload in uploaders:
-        try:
-            return upload(image_path)
-        except RuntimeError as exc:
-            errors.append(f"{name}: {exc}")
-            logger.warning("%s failed — trying next host...", name)
-
-    raise RuntimeError("All image hosts failed — " + "; ".join(errors))
+    """Try primary and fallback hosting services."""
+    try:
+        return upload_to_tmpfiles(image_path)
+    except RuntimeError:
+        logger.warning("tmpfiles failed — trying Litterbox fallback...")
+        return upload_to_litterbox(image_path)
 
 
 # ---------------------------------------------------------------------------
