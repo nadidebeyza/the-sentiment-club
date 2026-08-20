@@ -1109,44 +1109,44 @@ BROWSER_USER_AGENT = (
 )
 
 
-def upload_to_tmpfiles(image_path: Path) -> str:
-    """Upload image to tmpfiles.org (no Cloudflare blocks, direct HTTPS URL)."""
-    logger.info("Uploading image to tmpfiles.org...")
+def _verify_public_image_url(url: str) -> bool:
+    """Return True when URL serves a direct image Instagram can fetch."""
     headers = {"User-Agent": BROWSER_USER_AGENT}
     try:
-        with image_path.open("rb") as handle:
-            response = requests.post(
-                "https://tmpfiles.org/api/v1/upload",
-                files={"file": handle},
-                headers=headers,
-                timeout=60,
+        response = requests.head(url, headers=headers, timeout=30, allow_redirects=True)
+        if response.status_code >= 400:
+            response = requests.get(
+                url,
+                headers={**headers, "Range": "bytes=0-511"},
+                timeout=30,
+                allow_redirects=True,
             )
-        response.raise_for_status()
-        data = response.json()
-
-        # tmpfiles API yanıtındaki URL'yi direct image URL'e çeviriyoruz:
-        # 'https://tmpfiles.org/12345/final_post.jpg' -> 'https://tmpfiles.org/dl/12345/final_post.jpg'
-        raw_url = data["data"]["url"]
-        direct_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
-        if not direct_url.startswith("https://"):
-            raise ValueError(f"Unexpected tmpfiles response: {raw_url[:200]}")
-
-        logger.info("[✓] Hosted at tmpfiles — %s", direct_url)
-        return direct_url
-    except (requests.RequestException, KeyError, TypeError, ValueError) as exc:
-        logger.exception("tmpfiles upload failed")
-        raise RuntimeError("tmpfiles upload failed") from exc
+        content_type = response.headers.get("Content-Type", "").lower()
+        if content_type.startswith("image/"):
+            return True
+        if "text/html" in content_type:
+            return False
+    except requests.RequestException as exc:
+        if url.startswith(("https://files.catbox.moe/", "https://litter.catbox.moe/")):
+            logger.warning(
+                "Could not probe %s locally (%s) — trusting Catbox CDN URL",
+                url,
+                exc,
+            )
+            return True
+        return False
+    return False
 
 
 def upload_to_litterbox(image_path: Path) -> str:
-    """Fallback: upload to Litterbox (Catbox temporary 1-hour hosting)."""
-    logger.info("Uploading image to Litterbox (fallback)...")
+    """Upload to Litterbox — direct files.catbox.moe-style JPEG URL for Instagram."""
+    logger.info("Uploading image to Litterbox...")
     headers = {"User-Agent": BROWSER_USER_AGENT}
     try:
         with image_path.open("rb") as handle:
             response = requests.post(
                 "https://litterbox.catbox.moe/resources/internals/api.php",
-                data={"reqtype": "fileupload", "time": "1h"},
+                data={"reqtype": "fileupload", "time": "24h"},
                 files={"fileToUpload": (image_path.name, handle, "image/jpeg")},
                 headers=headers,
                 timeout=60,
@@ -1162,13 +1162,54 @@ def upload_to_litterbox(image_path: Path) -> str:
         raise RuntimeError("Litterbox upload failed") from exc
 
 
-def host_image(image_path: Path) -> str:
-    """Try primary and fallback hosting services."""
+def upload_to_catbox(image_path: Path) -> str:
+    """Fallback upload to catbox.moe with browser User-Agent."""
+    logger.info("Uploading image to Catbox...")
+    headers = {"User-Agent": BROWSER_USER_AGENT}
     try:
-        return upload_to_tmpfiles(image_path)
-    except RuntimeError:
-        logger.warning("tmpfiles failed — trying Litterbox fallback...")
-        return upload_to_litterbox(image_path)
+        with image_path.open("rb") as handle:
+            response = requests.post(
+                "https://catbox.moe/user/api.php",
+                data={"reqtype": "fileupload"},
+                files={"fileToUpload": (image_path.name, handle, "image/jpeg")},
+                headers=headers,
+                timeout=60,
+            )
+        response.raise_for_status()
+        url = response.text.strip()
+        if not url.startswith("https://"):
+            raise ValueError(f"Unexpected Catbox response: {url[:200]}")
+        logger.info("[✓] Hosted at Catbox — %s", url)
+        return url
+    except (requests.RequestException, ValueError) as exc:
+        logger.exception("Catbox upload failed")
+        raise RuntimeError("Catbox upload failed") from exc
+
+
+def host_image(image_path: Path) -> str:
+    """Upload and return an Instagram-compatible direct image URL."""
+    uploaders: list[tuple[str, Any]] = [
+        ("Catbox", upload_to_catbox),
+        ("Litterbox", upload_to_litterbox),
+    ]
+    errors: list[str] = []
+
+    for name, upload in uploaders:
+        try:
+            url = upload(image_path)
+            if _verify_public_image_url(url):
+                return url
+            logger.warning(
+                "%s URL is not a direct image (Instagram would reject it): %s",
+                name,
+                url,
+            )
+            errors.append(f"{name}: URL does not serve image/* content-type")
+        except RuntimeError as exc:
+            errors.append(f"{name}: {exc}")
+            logger.warning("%s failed — trying next host...", name)
+
+    raise RuntimeError("All image hosts failed — " + "; ".join(errors))
 
 
 # ---------------------------------------------------------------------------
