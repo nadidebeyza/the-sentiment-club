@@ -78,7 +78,10 @@ CONTENT_JSON_SCHEMA: dict[str, Any] = {
     "properties": {
         "word": {
             "type": "string",
-            "description": "Main keyword or concept (e.g. Kintsugi, Mono no aware).",
+            "description": (
+                "Romanized dictionary headword ONLY — lowercase hyphenated romaji. "
+                "Examples: yugen, wabi-sabi, mono-no-aware. Never IPA, kanji, or English."
+            ),
         },
         "subtitle": {
             "type": "string",
@@ -88,12 +91,25 @@ CONTENT_JSON_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": "Concise, impactful definition — max 12 words.",
         },
-        "viral_hook": {
+        "phonetic_ipa": {
             "type": "string",
             "description": (
-                "Dictionary phonetic line for the image, e.g. \"[wa:bɪ 'sa:bɪ] noun • Japanese\" "
-                "using valid IPA inside brackets, part of speech, and source language."
+                "IPA pronunciation ONLY — no brackets. Use real IPA symbols: "
+                "ː ˈ ˌ ɪ ʃ ɔː ɴ ɡ etc. Example: waːbi saːbi or juːɡeɴ"
             ),
+        },
+        "part_of_speech": {
+            "type": "string",
+            "enum": ["noun", "verb", "adjective", "phrase", "concept"],
+            "description": "Dictionary part of speech.",
+        },
+        "origin_language": {
+            "type": "string",
+            "description": "Source language, e.g. Japanese, Sanskrit, Latin, English.",
+        },
+        "viral_hook": {
+            "type": "string",
+            "description": "Legacy unused field — always set to empty string.",
         },
         "image_prompt": {
             "type": "string",
@@ -102,8 +118,8 @@ CONTENT_JSON_SCHEMA: dict[str, Any] = {
         "caption": {
             "type": "string",
             "description": (
-                "Instagram caption in plain text only (no markdown): scroll-stopping hook, "
-                "3-4 line story with emojis, and a save/share CTA."
+                "Instagram caption in 3-4 short paragraphs separated by blank lines. "
+                "Structure: hook paragraph, 1-2 story paragraphs with emojis, CTA paragraph."
             ),
         },
         "hashtags": {
@@ -111,19 +127,50 @@ CONTENT_JSON_SCHEMA: dict[str, Any] = {
             "items": {"type": "string"},
             "minItems": 15,
             "maxItems": 15,
-            "description": "15 hashtags: 5 broad, 5 niche, 5 high-intent community tags.",
+            "description": "15 lowercase hashtags without # prefix (e.g. philosophy, wabisabi).",
         },
     },
     "required": [
         "word",
         "subtitle",
         "definition",
+        "phonetic_ipa",
+        "part_of_speech",
+        "origin_language",
         "viral_hook",
         "image_prompt",
         "caption",
         "hashtags",
     ],
 }
+
+PHONETIC_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "phonetic_ipa": {
+            "type": "string",
+            "description": "IPA only, no brackets. Use ː for long vowels and ɴ for Japanese moraic n.",
+        },
+        "part_of_speech": {
+            "type": "string",
+            "enum": ["noun", "verb", "adjective", "phrase", "concept"],
+        },
+        "origin_language": {"type": "string"},
+    },
+    "required": ["phonetic_ipa", "part_of_speech", "origin_language"],
+}
+
+ALLOWED_PARTS_OF_SPEECH = frozenset({"noun", "verb", "adjective", "phrase", "concept"})
+MACRON_TO_IPA = str.maketrans({
+    "ā": "aː", "ē": "eː", "ī": "iː", "ō": "oː", "ū": "uː",
+    "Ā": "aː", "Ē": "eː", "Ī": "iː", "Ō": "oː", "Ū": "uː",
+})
+VALID_IPA_PATTERN = re.compile(
+    r"^[a-zA-Z\u0250-\u02AF\u02B0-\u02FF\u0300-\u036F\s'.\-]+$"
+)
+MACRON_TO_ASCII = str.maketrans("āēīōūĀĒĪŌŪ", "aeiouAEIOU")
+HEADWORD_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+IPA_QUALITY_MARKERS = frozenset("ːˈˌɑæəɚɜɪɔʊʌθðʃʒŋɲɴɡᵻ")
 
 GEMINI_SYSTEM_PROMPT = """You are the creative director for @thesentimentclub — an Instagram brand
 that explores philosophy, deep Japanese concepts, psychology, and the hidden
@@ -137,13 +184,22 @@ Generate ONE unique post concept that is:
 Rules:
 - definition MUST be 12 words or fewer
 - subtitle MUST be kanji or native script for the concept (e.g. 侘寂, 物の哀れ)
-- viral_hook MUST be a dictionary phonetic line with valid IPA, e.g. "[wa:bɪ 'sa:bɪ] noun • Japanese"
-- word MUST be the romanized/lowercase entry headword (e.g. wabi-sabi)
+- phonetic_ipa MUST be accurate IPA only (no brackets): use ː for long vowels, ɴ for Japanese moraic n
+  Examples: wabi-sabi -> waːbi saːbi | yūgen -> juːɡeɴ | ikigai -> ikigai
+- part_of_speech MUST be one of: noun, verb, adjective, phrase, concept
+- origin_language MUST name the source language (e.g. Japanese, Sanskrit)
+- word MUST be the romanized dictionary headword ONLY — never IPA, kanji, or English
+  Format: lowercase hyphenated romaji (yugen, wabi-sabi, mono-no-aware, ikigai)
+  WRONG for word: juːɡeɴ, mono no aware (use mono-no-aware), 物の哀れ, Mono No Aware
+- phonetic_ipa goes ONLY in phonetic_ipa — never duplicate the headword or put IPA in word
+- viral_hook MUST be an empty string ""
 - image_prompt MUST be an empty string ""
-- caption MUST include: a punchy first-line hook, 3-4 story lines with emojis,
-  and a clear CTA to SAVE and SHARE
+- caption MUST be split into 3-4 short paragraphs separated by blank lines (\\n\\n):
+  1) one-line hook | 2) story/context with emojis | 3) optional depth line | 4) save/share CTA
+- caption MUST NOT be one long single paragraph — keep each block 1-2 sentences max
 - caption MUST be plain text only — never use markdown (**bold**, *italic*, etc.)
-- hashtags MUST be exactly 15 (5 broad, 5 niche, 5 high-intent community)
+- caption MUST NOT use ALL CAPS words or lines for emphasis — use sentence case
+- hashtags MUST be exactly 15, all lowercase, with no # prefix in the JSON array
 - Output ONLY valid JSON matching the schema — no markdown, no commentary
 """
 
@@ -166,38 +222,292 @@ def _strip_markdown(text: str) -> str:
     return re.sub(r"  +", " ", cleaned).strip()
 
 
+def _looks_like_ipa(text: str) -> bool:
+    """Detect IPA/pronunciation strings that must not be used as the headword."""
+    return any(marker in text for marker in IPA_QUALITY_MARKERS) or any(
+        symbol in text for symbol in ("ː", "ˈ", "ˌ", "[", "]")
+    )
+
+
+def _normalize_headword(word: str) -> str:
+    """Normalize to compact lowercase hyphenated romaji (yugen, mono-no-aware)."""
+    headword = word.strip().translate(MACRON_TO_ASCII).lower()
+    headword = headword.replace("_", "-")
+    headword = re.sub(r"[^a-z0-9\s-]", "", headword)
+    headword = re.sub(r"\s+", "-", headword.strip())
+    headword = re.sub(r"-+", "-", headword).strip("-")
+    return headword
+
+
+def _is_valid_headword(word: str) -> bool:
+    """Headword must be romaji — not IPA, not empty, not punctuation-heavy."""
+    if not word or _looks_like_ipa(word):
+        return False
+    return bool(HEADWORD_PATTERN.fullmatch(word))
+
+
+def _normalize_hashtag(tag: str) -> str:
+    """Force lowercase hashtags — Instagram tags are case-insensitive but look cleaner."""
+    return tag.strip().lstrip("#").lower()
+
+
+def _fix_caption_line_caps(line: str) -> str:
+    """Remove shouty ALL CAPS from a single caption line."""
+    stripped = line.strip()
+    if stripped and stripped.isupper() and any(char.isalpha() for char in stripped):
+        return stripped.capitalize()
+    return re.sub(
+        r"\b([A-Z]{2,})\b",
+        lambda match: match.group(1).capitalize(),
+        line,
+    )
+
+
+def _split_sentences_into_paragraphs(text: str) -> str:
+    """Break a single caption block into readable hook / body / CTA paragraphs."""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+    if not sentences:
+        return text.strip()
+    if len(sentences) == 1:
+        return sentences[0]
+
+    cta_keywords = ("save", "share", "bookmark", "tag someone", "send this")
+    hook = sentences[0]
+    body = sentences[1:]
+    cta = ""
+    if body and any(keyword in body[-1].lower() for keyword in cta_keywords):
+        cta = body.pop()
+
+    paragraphs = [hook]
+    for index in range(0, len(body), 2):
+        chunk = " ".join(body[index : index + 2]).strip()
+        if chunk:
+            paragraphs.append(chunk)
+    if cta:
+        paragraphs.append(cta)
+    return "\n\n".join(paragraphs)
+
+
+def _format_caption_paragraphs(caption: str) -> str:
+    """Ensure caption uses blank lines between short, readable paragraphs."""
+    text = caption.strip()
+    if not text:
+        return text
+
+    if re.search(r"\n\s*\n", text):
+        paragraphs: list[str] = []
+        for block in re.split(r"\n\s*\n", text):
+            lines = [_fix_caption_line_caps(line) for line in block.splitlines() if line.strip()]
+            if lines:
+                paragraphs.append("\n".join(lines))
+        return "\n\n".join(paragraphs)
+
+    lines = [_fix_caption_line_caps(line) for line in text.splitlines() if line.strip()]
+    if len(lines) <= 1:
+        single = lines[0] if lines else _fix_caption_line_caps(text)
+        return _split_sentences_into_paragraphs(single)
+
+    cta_keywords = ("save", "share", "bookmark", "tag someone", "send this")
+    paragraphs = [lines[0]]
+    cta = lines[-1] if any(keyword in lines[-1].lower() for keyword in cta_keywords) else ""
+    body = lines[1:-1] if cta else lines[1:]
+
+    for index in range(0, len(body), 2):
+        chunk_lines = body[index : index + 2]
+        if chunk_lines:
+            paragraphs.append("\n".join(chunk_lines))
+    if cta:
+        paragraphs.append(cta)
+    elif lines[-1] != lines[0]:
+        paragraphs.append(lines[-1])
+
+    return "\n\n".join(paragraphs)
+
+
+def _normalize_caption_text(caption: str) -> str:
+    """Normalize caption emphasis and enforce paragraph spacing."""
+    return _format_caption_paragraphs(_strip_markdown(caption.strip()))
+
+
+def _normalize_ipa(raw: str) -> str:
+    """Normalize IPA string to consistent dictionary-style notation."""
+    ipa = raw.strip().strip("[]")
+    ipa = ipa.translate(MACRON_TO_IPA)
+    ipa = ipa.replace(":", "ː")
+    ipa = re.sub(r"\s+", " ", ipa)
+    ipa = ipa.replace("-", " ")
+    return ipa.strip()
+
+
+def _is_valid_ipa(ipa: str) -> bool:
+    """Return True when pronunciation looks like real IPA, not plain romanization."""
+    cleaned = _normalize_ipa(ipa)
+    if len(cleaned) < 2 or not VALID_IPA_PATTERN.fullmatch(cleaned):
+        return False
+    if any(marker in cleaned for marker in IPA_QUALITY_MARKERS):
+        return True
+    if "ː" in cleaned or "ˈ" in cleaned or "ˌ" in cleaned:
+        return True
+    # Reject plain ASCII romanization such as "yugen" or "wabi sabi"
+    return not re.fullmatch(r"[a-zA-Z\s'.-]+", cleaned)
+
+
+def _normalize_part_of_speech(value: str) -> str:
+    pos = value.strip().lower()
+    return pos if pos in ALLOWED_PARTS_OF_SPEECH else "noun"
+
+
+def _parse_legacy_phonetic_line(line: str) -> tuple[str, str, str]:
+    """Parse legacy `[ipa] noun • Japanese` lines from older Gemini output."""
+    text = line.strip()
+    match = re.match(r"^\[(?P<ipa>[^\]]+)\]\s*(?P<pos>[A-Za-z]+)\s*•\s*(?P<lang>.+)$", text)
+    if match:
+        return (
+            match.group("ipa"),
+            _normalize_part_of_speech(match.group("pos")),
+            match.group("lang").strip(),
+        )
+    return text.strip("[]"), "noun", "Japanese"
+
+
+def _extract_phonetic_fields(data: dict[str, Any]) -> tuple[str, str, str]:
+    """Read structured phonetic fields, with legacy viral_hook fallback."""
+    if data.get("phonetic_ipa"):
+        return (
+            data["phonetic_ipa"],
+            _normalize_part_of_speech(data.get("part_of_speech", "noun")),
+            data.get("origin_language", "Japanese").strip() or "Japanese",
+        )
+
+    legacy = data.get("viral_hook", "").strip()
+    if legacy:
+        ipa, pos, lang = _parse_legacy_phonetic_line(legacy)
+        return ipa, pos, lang
+
+    return data.get("word", "").strip(), "noun", "Japanese"
+
+
+def _format_phonetic_line(content: PostContent) -> str:
+    """Always render `[ipa] part_of_speech • language` consistently."""
+    ipa = _normalize_ipa(content.phonetic_ipa)
+    pos = _normalize_part_of_speech(content.part_of_speech)
+    language = content.origin_language.strip() or "Japanese"
+    return f"[{ipa}] {pos} • {language}"
+
+
+def _refine_phonetic(client: genai.Client, content: PostContent, model: str) -> PostContent:
+    """Run a focused low-temperature Gemini call to correct IPA pronunciation."""
+    prompt = f"""You are an expert phonetician. Return ONLY JSON.
+
+Word (headword): {content.word}
+Native script: {content.subtitle}
+Definition: {content.definition}
+
+Provide accurate IPA for this term:
+- phonetic_ipa: IPA only, NO brackets. Use ː for long vowels, ɴ for Japanese moraic n, proper IPA symbols.
+- part_of_speech: noun, verb, adjective, phrase, or concept
+- origin_language: source language name (e.g. Japanese)
+
+Examples:
+- yugen / 幽玄 -> juːɡeɴ
+- wabi-sabi / 侘寂 -> waːbi saːbi
+- mono-no-aware / 物の哀れ -> mono no aɰaɾe
+- ikigai / 生き甲斐 -> ikigai
+"""
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            temperature=0.1,
+            response_mime_type="application/json",
+            response_json_schema=PHONETIC_JSON_SCHEMA,
+        ),
+    )
+    raw = response.text
+    if not raw:
+        raise ValueError("Phonetic refinement returned empty response")
+    data = json.loads(raw)
+    ipa = _normalize_ipa(data["phonetic_ipa"])
+    if not _is_valid_ipa(ipa):
+        raise ValueError(f"Refined IPA still invalid: {ipa}")
+    return PostContent(
+        word=content.word,
+        subtitle=content.subtitle,
+        definition=content.definition,
+        phonetic_ipa=ipa,
+        part_of_speech=_normalize_part_of_speech(data["part_of_speech"]),
+        origin_language=data["origin_language"].strip() or content.origin_language,
+        image_prompt=content.image_prompt,
+        caption=content.caption,
+        hashtags=content.hashtags,
+    )
+
+
+def _ensure_phonetic(client: genai.Client, content: PostContent, model: str) -> PostContent:
+    """Validate IPA; run a focused refinement pass when Gemini output is weak."""
+    content.phonetic_ipa = _normalize_ipa(content.phonetic_ipa)
+    if _is_valid_ipa(content.phonetic_ipa):
+        content.part_of_speech = _normalize_part_of_speech(content.part_of_speech)
+        return content
+
+    logger.warning("IPA looks inaccurate (%s) — refining with phonetician pass...", content.phonetic_ipa)
+    try:
+        refined = _refine_phonetic(client, content, model)
+        logger.info("[✓] IPA refined — %s", _format_phonetic_line(refined))
+        return refined
+    except Exception as exc:
+        logger.warning("IPA refinement failed (%s) — keeping normalized best effort", exc)
+        content.part_of_speech = _normalize_part_of_speech(content.part_of_speech)
+        return content
+
+
 @dataclass
 class PostContent:
     word: str
     subtitle: str
     definition: str
-    viral_hook: str
+    phonetic_ipa: str
+    part_of_speech: str
+    origin_language: str
     image_prompt: str
     caption: str
     hashtags: list[str]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PostContent:
-        hashtags = [tag.strip().lstrip("#") for tag in data["hashtags"]]
+        hashtags = [_normalize_hashtag(tag) for tag in data["hashtags"]]
         if len(hashtags) != 15:
             raise ValueError(f"Expected 15 hashtags, got {len(hashtags)}")
+
         definition_words = data["definition"].split()
         if len(definition_words) > 12:
             raise ValueError(
                 f"Definition exceeds 12 words ({len(definition_words)}): {data['definition']}"
             )
+
+        phonetic_ipa, part_of_speech, origin_language = _extract_phonetic_fields(data)
+        word = _normalize_headword(data["word"])
+        phonetic_ipa = _normalize_ipa(phonetic_ipa)
+
+        if not _is_valid_headword(word) or word.replace("-", " ") == phonetic_ipa.replace(" ", "-"):
+            raise ValueError(
+                f"Invalid headword '{data['word']}'. word must be romaji like yugen or mono-no-aware, not IPA."
+            )
+
         return cls(
-            word=_strip_markdown(data["word"].strip()),
+            word=word,
             subtitle=_strip_markdown(data["subtitle"].strip()),
             definition=_strip_markdown(data["definition"].strip()),
-            viral_hook=_strip_markdown(data["viral_hook"].strip()),
-            image_prompt=data["image_prompt"].strip(),
-            caption=_strip_markdown(data["caption"].strip()),
+            phonetic_ipa=phonetic_ipa,
+            part_of_speech=part_of_speech,
+            origin_language=origin_language.strip(),
+            image_prompt=data.get("image_prompt", "").strip(),
+            caption=_normalize_caption_text(data["caption"].strip()),
             hashtags=hashtags,
         )
 
     def full_caption(self) -> str:
-        tags = " ".join(f"#{tag}" for tag in self.hashtags)
+        tags = " ".join(f"#{_normalize_hashtag(tag)}" for tag in self.hashtags)
         return f"{self.caption}\n\n{tags}"
 
 
@@ -336,7 +646,12 @@ def generate_content() -> PostContent:
                     raise ValueError("Gemini returned an empty response")
                 data = json.loads(raw)
                 content = PostContent.from_dict(data)
-                logger.info("[✓] Gemini Content Generated — concept: %s", content.word)
+                content = _ensure_phonetic(client, content, model)
+                logger.info(
+                    "[✓] Gemini Content Generated — concept: %s (%s)",
+                    content.word,
+                    _format_phonetic_line(content),
+                )
                 return content
             except json.JSONDecodeError as exc:
                 logger.exception("Gemini returned invalid JSON")
@@ -582,14 +897,6 @@ def _draw_left_text(
     return y
 
 
-def _format_phonetic_line(content: PostContent) -> str:
-    """Build dictionary meta line from viral_hook or a sensible fallback."""
-    hook = content.viral_hook.strip()
-    if hook and ("•" in hook or hook.startswith("[")):
-        return hook
-    return f"[{content.word.lower()}] noun • Japanese"
-
-
 def create_post_image(content: PostContent) -> Path:
     """Compose a minimalist dictionary-style Instagram image on pure white."""
     logger.info("Creating dictionary-style post image...")
@@ -610,7 +917,7 @@ def create_post_image(content: PostContent) -> Path:
         draw.text((MARGIN_X, y), content.subtitle, font=font_kanji, fill=COLOR_TEXT)
         y += _line_height(font_kanji) + 28
 
-        # 2) Main headword — large lowercase serif
+        # 2) Main headword — large compact romaji (e.g. yugen, mono-no-aware)
         y = _draw_left_text(
             draw,
             MARGIN_X,
@@ -620,7 +927,7 @@ def create_post_image(content: PostContent) -> Path:
             COLOR_TEXT,
             max_width,
             line_spacing=6,
-            lowercase=True,
+            lowercase=False,
         )
         y += 40
 
