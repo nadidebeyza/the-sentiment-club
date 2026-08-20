@@ -1,0 +1,7 @@
+.env
+*.pyc
+__pycache__/
+.venv/
+venv/
+final_post.jpg
+*.log
