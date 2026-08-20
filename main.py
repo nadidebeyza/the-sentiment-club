@@ -1100,16 +1100,26 @@ def create_post_image(content: PostContent) -> Path:
 # Stage 3 — Hosting
 # ---------------------------------------------------------------------------
 
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
 
 def upload_to_catbox(image_path: Path) -> str:
     """Upload image to catbox.moe and return direct HTTPS URL."""
     logger.info("Uploading image to Catbox...")
+
+    # Cloudflare / 412 Precondition Failed engelini aşmak için User-Agent ekliyoruz
+    headers = {"User-Agent": BROWSER_USER_AGENT}
+
     try:
         with image_path.open("rb") as handle:
             response = requests.post(
                 "https://catbox.moe/user/api.php",
                 data={"reqtype": "fileupload"},
                 files={"fileToUpload": (image_path.name, handle, "image/jpeg")},
+                headers=headers,
                 timeout=60,
             )
         response.raise_for_status()
@@ -1123,16 +1133,43 @@ def upload_to_catbox(image_path: Path) -> str:
         raise RuntimeError("Catbox upload failed") from exc
 
 
+def upload_to_0x0(image_path: Path) -> str:
+    """Fallback upload to 0x0.st — free, no API key required."""
+    logger.info("Uploading image to 0x0.st (fallback)...")
+    headers = {"User-Agent": BROWSER_USER_AGENT}
+    try:
+        with image_path.open("rb") as handle:
+            response = requests.post(
+                "https://0x0.st",
+                files={"file": (image_path.name, handle, "image/jpeg")},
+                headers=headers,
+                timeout=60,
+            )
+        response.raise_for_status()
+        url = response.text.strip()
+        if not url.startswith("https://"):
+            raise ValueError(f"Unexpected 0x0.st response: {url[:200]}")
+        logger.info("[✓] Hosted at 0x0.st — %s", url)
+        return url
+    except (requests.RequestException, ValueError) as exc:
+        logger.exception("0x0.st upload failed")
+        raise RuntimeError("0x0.st upload failed") from exc
+
+
 def upload_to_imgur(image_path: Path) -> str:
-    """Fallback upload to Imgur (requires IMGUR_CLIENT_ID)."""
+    """Optional fallback upload to Imgur (requires IMGUR_CLIENT_ID)."""
     if not IMGUR_CLIENT_ID:
         raise RuntimeError("IMGUR_CLIENT_ID not set — cannot use Imgur fallback")
     logger.info("Uploading image to Imgur (fallback)...")
+    headers = {"User-Agent": BROWSER_USER_AGENT}
     try:
         with image_path.open("rb") as handle:
             response = requests.post(
                 "https://api.imgur.com/3/upload",
-                headers={"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"},
+                headers={
+                    "Authorization": f"Client-ID {IMGUR_CLIENT_ID}",
+                    **headers,
+                },
                 files={"image": handle},
                 timeout=60,
             )
@@ -1147,12 +1184,23 @@ def upload_to_imgur(image_path: Path) -> str:
 
 
 def host_image(image_path: Path) -> str:
-    """Upload to Catbox with Imgur fallback."""
-    try:
-        return upload_to_catbox(image_path)
-    except RuntimeError:
-        logger.warning("Catbox failed — attempting Imgur fallback...")
-        return upload_to_imgur(image_path)
+    """Upload with Catbox primary, then free fallbacks (0x0.st, optional Imgur)."""
+    uploaders: list[tuple[str, Any]] = [
+        ("Catbox", upload_to_catbox),
+        ("0x0.st", upload_to_0x0),
+    ]
+    if IMGUR_CLIENT_ID:
+        uploaders.append(("Imgur", upload_to_imgur))
+
+    errors: list[str] = []
+    for name, upload in uploaders:
+        try:
+            return upload(image_path)
+        except RuntimeError as exc:
+            errors.append(f"{name}: {exc}")
+            logger.warning("%s failed — trying next host...", name)
+
+    raise RuntimeError("All image hosts failed — " + "; ".join(errors))
 
 
 # ---------------------------------------------------------------------------
