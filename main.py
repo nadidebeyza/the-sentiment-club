@@ -35,11 +35,16 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 GEMINI_MAX_RETRIES = int(os.getenv("GEMINI_MAX_RETRIES", "4"))
 GEMINI_RETRY_BASE_SECONDS = int(os.getenv("GEMINI_RETRY_BASE_SECONDS", "5"))
+MODELS_TO_TRY = [
+    "gemini-3.6-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+]
 GEMINI_FALLBACK_MODELS = [
     model.strip()
     for model in os.getenv(
         "GEMINI_FALLBACK_MODELS",
-        "gemini-2.5-flash,gemini-1.5-flash,gemini-2.5-pro",
+        "gemini-2.0-flash,gemini-1.5-flash",
     ).split(",")
     if model.strip()
 ]
@@ -615,34 +620,24 @@ def validate_env() -> None:
 
 
 def _gemini_models_to_try() -> list[str]:
-    """Primary model first, then quota-separated fallback models."""
-    models = [GEMINI_MODEL]
-    for model in GEMINI_FALLBACK_MODELS:
+    """Return ordered Gemini models: primary first, then valid fallbacks."""
+    if os.getenv("GEMINI_FALLBACK_MODELS"):
+        models = [GEMINI_MODEL]
+        for model in GEMINI_FALLBACK_MODELS:
+            if model not in models:
+                models.append(model)
+        return models
+
+    models: list[str] = []
+    for model in [GEMINI_MODEL, *MODELS_TO_TRY]:
         if model not in models:
             models.append(model)
     return models
 
 
-def _is_quota_exhausted_error(exc: Exception) -> bool:
-    """Return True when Gemini quota/rate limit is exhausted (switch model immediately)."""
-    if isinstance(exc, (genai.errors.ClientError, genai.errors.ServerError)):
-        code = getattr(exc, "status_code", None)
-        if code == 429:
-            return True
-    message = str(exc).upper()
-    return any(token in message for token in ("429", "RESOURCE_EXHAUSTED", "QUOTA_EXCEEDED"))
-
-
-def _is_transient_gemini_error(exc: Exception) -> bool:
-    """Return True for temporary Gemini capacity failures (retry same model)."""
-    if _is_quota_exhausted_error(exc):
-        return False
-    if isinstance(exc, genai.errors.ServerError):
-        code = getattr(exc, "status_code", None)
-        if code in {500, 503}:
-            return True
-    message = str(exc).upper()
-    return any(token in message for token in ("503", "UNAVAILABLE"))
+def _is_invalid_gemini_api_key_error(exc: Exception) -> bool:
+    message = str(exc)
+    return "API key not valid" in message or "API_KEY_INVALID" in message
 
 
 def load_word_history() -> list[dict[str, str]]:
@@ -719,92 +714,77 @@ def build_gemini_prompt(history: list[dict[str, str]], *, duplicate_retry: bool 
 
 
 def _call_gemini_for_content(client: genai.Client, prompt: str) -> PostContent:
-    """Call Gemini models with retries and return validated post content."""
+    """Try Gemini models sequentially until one succeeds."""
     config = types.GenerateContentConfig(
         temperature=0.9,
         response_mime_type="application/json",
         response_json_schema=CONTENT_JSON_SCHEMA,
     )
     last_error: Exception | None = None
-    models_to_try = _gemini_models_to_try()
 
-    for model in models_to_try:
-        for attempt in range(1, GEMINI_MAX_RETRIES + 1):
-            try:
-                logger.info(
-                    "Attempting content generation with model: %s (attempt %s/%s)",
+    for model in _gemini_models_to_try():
+        try:
+            logger.info("Attempting content generation with model: %s", model)
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=config,
+            )
+            raw = response.text
+            if not raw:
+                raise ValueError("Gemini returned an empty response")
+            data = json.loads(raw)
+            content = PostContent.from_dict(data)
+            content = _ensure_phonetic(client, content, model)
+            return content
+        except json.JSONDecodeError as exc:
+            logger.warning(
+                "Model %s returned invalid JSON (%s). Trying next fallback model...",
+                model,
+                exc,
+            )
+            last_error = exc
+        except ValueError as exc:
+            if "Invalid headword" in str(exc) or "Expected 15 hashtags" in str(exc):
+                logger.warning(
+                    "Model %s content validation failed (%s). Trying next fallback model...",
                     model,
-                    attempt,
-                    GEMINI_MAX_RETRIES,
+                    exc,
                 )
-                response = client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=config,
-                )
-                raw = response.text
-                if not raw:
-                    raise ValueError("Gemini returned an empty response")
-                data = json.loads(raw)
-                content = PostContent.from_dict(data)
-                content = _ensure_phonetic(client, content, model)
-                return content
-            except json.JSONDecodeError as exc:
-                logger.exception("Gemini returned invalid JSON")
-                raise RuntimeError("Failed to parse Gemini JSON output") from exc
-            except ValueError as exc:
-                if "Invalid headword" in str(exc) or "Expected 15 hashtags" in str(exc):
-                    logger.warning("Content validation failed: %s", exc)
-                    last_error = exc
-                    break
-                raise
-            except genai.errors.ClientError as exc:
-                if "API key not valid" in str(exc) or "API_KEY_INVALID" in str(exc):
-                    raise RuntimeError(
-                        "Invalid GEMINI_API_KEY. Create a key at "
-                        "https://aistudio.google.com/apikey (starts with 'AIza') "
-                        "and set it in your .env file."
-                    ) from exc
-                if _is_quota_exhausted_error(exc):
-                    logger.warning("Quota exceeded for %s — trying fallback model...", model)
-                    last_error = exc
-                    break
-                if _is_transient_gemini_error(exc) and attempt < GEMINI_MAX_RETRIES:
-                    wait = GEMINI_RETRY_BASE_SECONDS * attempt
-                    logger.warning("Gemini transient error on %s — retrying in %ss...", model, wait)
-                    time.sleep(wait)
-                    last_error = exc
-                    continue
-                logger.exception("Gemini API request failed")
-                raise RuntimeError(f"Gemini API error: {exc}") from exc
-            except genai.errors.ServerError as exc:
-                if _is_quota_exhausted_error(exc):
-                    logger.warning("Quota exceeded for %s — trying fallback model...", model)
-                    last_error = exc
-                    break
-                if _is_transient_gemini_error(exc) and attempt < GEMINI_MAX_RETRIES:
-                    wait = GEMINI_RETRY_BASE_SECONDS * attempt
-                    logger.warning(
-                        "Gemini high demand (503) on %s — retrying in %ss...",
-                        model,
-                        wait,
-                    )
-                    time.sleep(wait)
-                    last_error = exc
-                    continue
-                logger.exception("Gemini server error on model %s", model)
                 last_error = exc
-                break
-            except Exception as exc:
-                logger.exception("Gemini content generation failed")
-                raise RuntimeError("Gemini content generation failed") from exc
-
-        if model != models_to_try[-1]:
-            logger.warning("Switching Gemini model fallback from %s...", model)
+                continue
+            raise
+        except genai.errors.ClientError as exc:
+            if _is_invalid_gemini_api_key_error(exc):
+                raise RuntimeError(
+                    "Invalid GEMINI_API_KEY. Create a key at "
+                    "https://aistudio.google.com/apikey (starts with 'AIza') "
+                    "and set it in your .env file."
+                ) from exc
+            logger.warning(
+                "Model %s failed (%s). Trying next fallback model...",
+                model,
+                exc,
+            )
+            last_error = exc
+        except genai.errors.ServerError as exc:
+            logger.warning(
+                "Model %s failed (%s). Trying next fallback model...",
+                model,
+                exc,
+            )
+            last_error = exc
+        except Exception as exc:
+            logger.warning(
+                "Model %s failed (%s). Trying next fallback model...",
+                model,
+                exc,
+            )
+            last_error = exc
 
     raise RuntimeError(
-        "All Gemini models exceeded quota or are temporarily unavailable. "
-        "Wait and retry, or adjust GEMINI_MODEL / GEMINI_FALLBACK_MODELS in .env."
+        "All Gemini models failed. Wait and retry, or adjust "
+        "GEMINI_MODEL / GEMINI_FALLBACK_MODELS in .env."
     ) from last_error
 
 
