@@ -28,7 +28,6 @@ from main import (
     WATERMARK_TEXT,
     PostContent,
     _draw_left_text,
-    _format_phonetic_line,
     _line_height,
     _load_custom_font,
     generate_content,
@@ -49,7 +48,6 @@ def create_story_image(content: PostContent) -> Path:
 
     font_kanji = _load_custom_font(70, is_kanji=True)
     font_word = _load_custom_font(120, display=True)
-    font_meta = _load_custom_font(45, ipa=True)
     font_definition = _load_custom_font(38)
     font_watermark = _load_custom_font(WATERMARK_FONT_SIZE, display=True)
 
@@ -71,10 +69,6 @@ def create_story_image(content: PostContent) -> Path:
         lowercase=False,
     )
     y += 48
-
-    meta_line = _format_phonetic_line(content)
-    draw.text((STORY_MARGIN_X, y), meta_line, font=font_meta, fill=COLOR_TEXT)
-    y += _line_height(font_meta) + 40
 
     draw.line(
         (STORY_MARGIN_X, y, STORY_WIDTH - STORY_MARGIN_X, y),

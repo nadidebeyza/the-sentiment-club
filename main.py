@@ -108,22 +108,6 @@ CONTENT_JSON_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": "Concise, impactful definition — max 12 words.",
         },
-        "phonetic_ipa": {
-            "type": "string",
-            "description": (
-                "IPA pronunciation ONLY — no brackets. Use real IPA symbols: "
-                "ː ˈ ˌ ɪ ʃ ɔː ɴ ɡ etc. Example: waːbi saːbi or juːɡeɴ"
-            ),
-        },
-        "part_of_speech": {
-            "type": "string",
-            "enum": ["noun", "verb", "adjective", "phrase", "concept"],
-            "description": "Dictionary part of speech.",
-        },
-        "origin_language": {
-            "type": "string",
-            "description": "Source language, e.g. Japanese, Sanskrit, Latin, English.",
-        },
         "viral_hook": {
             "type": "string",
             "description": "Legacy unused field — always set to empty string.",
@@ -151,9 +135,6 @@ CONTENT_JSON_SCHEMA: dict[str, Any] = {
         "word",
         "subtitle",
         "definition",
-        "phonetic_ipa",
-        "part_of_speech",
-        "origin_language",
         "viral_hook",
         "image_prompt",
         "caption",
@@ -161,35 +142,8 @@ CONTENT_JSON_SCHEMA: dict[str, Any] = {
     ],
 }
 
-PHONETIC_JSON_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "phonetic_ipa": {
-            "type": "string",
-            "description": "IPA only, no brackets. Use ː for long vowels and ɴ for Japanese moraic n.",
-        },
-        "part_of_speech": {
-            "type": "string",
-            "enum": ["noun", "verb", "adjective", "phrase", "concept"],
-        },
-        "origin_language": {"type": "string"},
-    },
-    "required": ["phonetic_ipa", "part_of_speech", "origin_language"],
-}
-
-ALLOWED_PARTS_OF_SPEECH = frozenset({"noun", "verb", "adjective", "phrase", "concept"})
-MACRON_TO_IPA = str.maketrans({
-    "ā": "aː", "ē": "eː", "ī": "iː", "ō": "oː", "ū": "uː",
-    "Ā": "aː", "Ē": "eː", "Ī": "iː", "Ō": "oː", "Ū": "uː",
-})
-VALID_IPA_PATTERN = re.compile(
-    r"^[a-zA-Z\u0250-\u02AF\u02B0-\u02FF\u0300-\u036F\s'.\-]+$"
-)
 MACRON_TO_ASCII = str.maketrans("āēīōūĀĒĪŌŪ", "aeiouAEIOU")
 HEADWORD_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-PHONETIC_META_PATTERN = re.compile(
-    r"^\[(?P<ipa>[^\]]+)\]\s*(?P<pos>[A-Za-z]+)\s*•\s*(?P<lang>.+)$"
-)
 IPA_QUALITY_MARKERS = frozenset("ːˈˌɑæəɚɜɪɔʊʌθðʃʒŋɲɴɡᵻɾɰ")
 
 GEMINI_SYSTEM_PROMPT = """You are the creative director for @thesentimentclub — an Instagram brand
@@ -204,14 +158,9 @@ Generate ONE unique post concept that is:
 Rules:
 - definition MUST be 12 words or fewer
 - subtitle MUST be kanji or native script for the concept (e.g. 侘寂, 物の哀れ)
-- phonetic_ipa MUST be accurate IPA only (no brackets): use ː for long vowels, ɴ for Japanese moraic n
-  Examples: wabi-sabi -> waːbi saːbi | yūgen -> juːɡeɴ | ikigai -> ikigai
-- part_of_speech MUST be one of: noun, verb, adjective, phrase, concept
-- origin_language MUST name the source language (e.g. Japanese, Sanskrit)
 - word MUST be the romanized dictionary headword ONLY — never IPA, kanji, or English
   Format: lowercase hyphenated romaji (yugen, wabi-sabi, mono-no-aware, ikigai)
   WRONG for word: juːɡeɴ, mono no aware (use mono-no-aware), 物の哀れ, Mono No Aware
-- phonetic_ipa goes ONLY in phonetic_ipa — never duplicate the headword or put IPA in word
 - viral_hook MUST be an empty string ""
 - image_prompt MUST be an empty string ""
 - caption MUST be split into 3-4 short paragraphs separated by blank lines (\\n\\n):
@@ -352,186 +301,11 @@ def _normalize_caption_text(caption: str) -> str:
     return _format_caption_paragraphs(_strip_markdown(caption.strip()))
 
 
-def _split_phonetic_blob(raw: str) -> tuple[str, str | None, str | None]:
-    """Extract IPA when Gemini mixes pronunciation with part-of-speech / language."""
-    text = raw.strip()
-    match = PHONETIC_META_PATTERN.match(text)
-    if match:
-        return (
-            match.group("ipa").strip(),
-            match.group("pos").strip(),
-            match.group("lang").strip(),
-        )
-
-    bracket_match = re.match(r"^\[(?P<ipa>[^\]]+)\](?:\s|$)", text)
-    if bracket_match:
-        return bracket_match.group("ipa").strip(), None, None
-
-    return text, None, None
-
-
-def _clean_ipa_symbols(ipa: str) -> str:
-    """Normalize IPA characters and spacing."""
-    cleaned = ipa.strip().strip("[]")
-    cleaned = cleaned.translate(MACRON_TO_IPA)
-    cleaned = cleaned.replace(":", "ː")
-    cleaned = cleaned.replace("ɽ", "ɾ")
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    cleaned = cleaned.replace("-", " ")
-    return cleaned.strip()
-
-
-def _normalize_ipa(raw: str) -> str:
-    """Normalize IPA string to consistent dictionary-style notation."""
-    ipa, _, _ = _split_phonetic_blob(raw)
-    return _clean_ipa_symbols(ipa)
-
-
-def _is_valid_ipa(ipa: str) -> bool:
-    """Return True when pronunciation looks like real IPA, not plain romanization."""
-    cleaned = _normalize_ipa(ipa)
-    if not cleaned or len(cleaned) < 2:
-        return False
-    if any(token in cleaned for token in ("•", "[", "]", " noun", " verb", " concept")):
-        return False
-    if not VALID_IPA_PATTERN.fullmatch(cleaned):
-        return False
-    if any(marker in cleaned for marker in IPA_QUALITY_MARKERS):
-        return True
-    if "ː" in cleaned or "ˈ" in cleaned or "ˌ" in cleaned:
-        return True
-    return not re.fullmatch(r"[a-zA-Z\s'.-]+", cleaned)
-
-
-def _normalize_part_of_speech(value: str) -> str:
-    pos = value.strip().lower()
-    return pos if pos in ALLOWED_PARTS_OF_SPEECH else "noun"
-
-
-def _parse_legacy_phonetic_line(line: str) -> tuple[str, str, str]:
-    """Parse legacy `[ipa] noun • Japanese` lines from older Gemini output."""
-    ipa, pos, lang = _split_phonetic_blob(line.strip())
-    if pos and lang:
-        return _normalize_ipa(ipa), _normalize_part_of_speech(pos), lang.strip()
-    return _normalize_ipa(ipa), "noun", "Japanese"
-
-
-def _extract_phonetic_fields(data: dict[str, Any]) -> tuple[str, str, str]:
-    """Read structured phonetic fields, with legacy viral_hook fallback."""
-    pos = _normalize_part_of_speech(data.get("part_of_speech", "noun"))
-    language = data.get("origin_language", "Japanese").strip() or "Japanese"
-    headword = _normalize_headword(data.get("word", ""))
-
-    raw_ipa = str(data.get("phonetic_ipa", "")).strip()
-    if raw_ipa:
-        ipa_part, blob_pos, blob_lang = _split_phonetic_blob(raw_ipa)
-        ipa = _normalize_ipa(ipa_part)
-        if blob_pos:
-            pos = _normalize_part_of_speech(blob_pos)
-        if blob_lang:
-            language = blob_lang.strip() or language
-        if headword and ipa.replace(" ", "-") == headword:
-            ipa = ""
-        return ipa, pos, language
-
-    legacy = data.get("viral_hook", "").strip()
-    if legacy:
-        return _parse_legacy_phonetic_line(legacy)
-
-    return "", pos, language
-
-
-def _format_phonetic_line(content: PostContent) -> str:
-    """Always render `[ipa] part_of_speech • language` consistently."""
-    ipa = _normalize_ipa(content.phonetic_ipa)
-    pos = _normalize_part_of_speech(content.part_of_speech)
-    language = content.origin_language.strip() or "Japanese"
-    return f"[{ipa}] {pos} • {language}"
-
-
-def _refine_phonetic(client: genai.Client, content: PostContent, model: str) -> PostContent:
-    """Run a focused low-temperature Gemini call to correct IPA pronunciation."""
-    prompt = f"""You are an expert phonetician. Return ONLY JSON.
-
-Word (headword): {content.word}
-Native script: {content.subtitle}
-Definition: {content.definition}
-
-Provide accurate IPA for this term:
-- phonetic_ipa: IPA only, NO brackets. Use ː for long vowels, ɴ for Japanese moraic n, proper IPA symbols.
-- part_of_speech: noun, verb, adjective, phrase, or concept
-- origin_language: source language name (e.g. Japanese)
-
-Examples:
-- yugen / 幽玄 -> juːɡeɴ
-- wabi-sabi / 侘寂 -> waːbi saːbi
-- mono-no-aware / 物の哀れ -> mono no aɰaɾe
-- ikigai / 生き甲斐 -> ikigai
-"""
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.1,
-            response_mime_type="application/json",
-            response_json_schema=PHONETIC_JSON_SCHEMA,
-        ),
-    )
-    raw = response.text
-    if not raw:
-        raise ValueError("Phonetic refinement returned empty response")
-    data = json.loads(raw)
-    ipa = _normalize_ipa(data["phonetic_ipa"])
-    if not _is_valid_ipa(ipa):
-        raise ValueError(f"Refined IPA still invalid: {ipa}")
-    return PostContent(
-        word=content.word,
-        subtitle=content.subtitle,
-        definition=content.definition,
-        phonetic_ipa=ipa,
-        part_of_speech=_normalize_part_of_speech(data["part_of_speech"]),
-        origin_language=data["origin_language"].strip() or content.origin_language,
-        image_prompt=content.image_prompt,
-        caption=content.caption,
-        hashtags=content.hashtags,
-    )
-
-
-def _ensure_phonetic(client: genai.Client, content: PostContent, model: str) -> PostContent:
-    """Validate IPA; run a focused refinement pass when Gemini output is weak or mixed."""
-    ipa_part, blob_pos, blob_lang = _split_phonetic_blob(content.phonetic_ipa)
-    content.phonetic_ipa = _normalize_ipa(ipa_part)
-    if blob_pos:
-        content.part_of_speech = _normalize_part_of_speech(blob_pos)
-    if blob_lang:
-        content.origin_language = blob_lang.strip() or content.origin_language
-    content.part_of_speech = _normalize_part_of_speech(content.part_of_speech)
-
-    if _is_valid_ipa(content.phonetic_ipa):
-        return content
-
-    logger.warning(
-        "IPA looks inaccurate (%s) — refining with phonetician pass...",
-        content.phonetic_ipa or content.word,
-    )
-    try:
-        refined = _refine_phonetic(client, content, model)
-        logger.info("[✓] IPA refined — %s", _format_phonetic_line(refined))
-        return refined
-    except Exception as exc:
-        logger.warning("IPA refinement failed (%s) — keeping normalized best effort", exc)
-        content.part_of_speech = _normalize_part_of_speech(content.part_of_speech)
-        return content
-
-
 @dataclass
 class PostContent:
     word: str
     subtitle: str
     definition: str
-    phonetic_ipa: str
-    part_of_speech: str
-    origin_language: str
     image_prompt: str
     caption: str
     hashtags: list[str]
@@ -548,11 +322,8 @@ class PostContent:
                 f"Definition exceeds 12 words ({len(definition_words)}): {data['definition']}"
             )
 
-        phonetic_ipa, part_of_speech, origin_language = _extract_phonetic_fields(data)
         word = _normalize_headword(data["word"])
-        phonetic_ipa = _normalize_ipa(phonetic_ipa)
-
-        if not _is_valid_headword(word) or word.replace("-", " ") == phonetic_ipa.replace(" ", "-"):
+        if not _is_valid_headword(word):
             raise ValueError(
                 f"Invalid headword '{data['word']}'. word must be romaji like yugen or mono-no-aware, not IPA."
             )
@@ -561,9 +332,6 @@ class PostContent:
             word=word,
             subtitle=_strip_markdown(data["subtitle"].strip()),
             definition=_strip_markdown(data["definition"].strip()),
-            phonetic_ipa=phonetic_ipa,
-            part_of_speech=part_of_speech,
-            origin_language=origin_language.strip(),
             image_prompt=data.get("image_prompt", "").strip(),
             caption=_normalize_caption_text(data["caption"].strip()),
             hashtags=hashtags,
@@ -777,7 +545,6 @@ def _call_gemini_for_content(client: genai.Client, prompt: str) -> PostContent:
                 raise ValueError("Gemini returned an empty response")
             data = json.loads(raw)
             content = PostContent.from_dict(data)
-            content = _ensure_phonetic(client, content, model)
             return content
         except json.JSONDecodeError as exc:
             logger.warning(
@@ -857,7 +624,7 @@ def generate_content() -> PostContent:
         logger.info(
             "[✓] Gemini Content Generated — concept: %s (%s)",
             content.word,
-            _format_phonetic_line(content),
+            content.subtitle,
         )
         return content
 
@@ -942,30 +709,11 @@ def _display_font_candidates() -> list[Path]:
     return candidates
 
 
-def _ipa_font_candidates() -> list[Path]:
-    """Fonts with IPA / extended Latin coverage for phonetic pronunciation lines."""
-    if sys.platform == "darwin":
-        return [
-            Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
-            Path("/Library/Fonts/Arial Unicode.ttf"),
-        ]
-    if sys.platform.startswith("linux"):
-        return [
-            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-            Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
-        ]
-    return [
-        Path("C:/Windows/Fonts/ARIALUNI.TTF"),
-        Path("C:/Windows/Fonts/arialuni.ttf"),
-    ]
-
-
 def _load_custom_font(
     size: int,
     *,
     is_kanji: bool = False,
     italic: bool = False,
-    ipa: bool = False,
     display: bool = False,
 ) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     """Load font.ttf for Latin text, or a CJK-capable system font for subtitle/kanji."""
@@ -983,10 +731,7 @@ def _load_custom_font(
             BASE_DIR,
         )
         return _load_custom_font(size, italic=False)
-    if ipa:
-        candidates = _ipa_font_candidates()
-        label = "IPA"
-    elif is_kanji:
+    if is_kanji:
         for path, index in _kanji_font_candidates():
             if path.exists():
                 try:
@@ -1075,7 +820,6 @@ def create_post_image(content: PostContent) -> Path:
 
         font_kanji = _load_custom_font(60, is_kanji=True)
         font_word = _load_custom_font(110, display=True)
-        font_meta = _load_custom_font(40, ipa=True)
         font_definition = _load_custom_font(34)
         font_watermark = _load_custom_font(WATERMARK_FONT_SIZE, display=True)
 
@@ -1100,12 +844,7 @@ def create_post_image(content: PostContent) -> Path:
         )
         y += 40
 
-        # 3) IPA phonetic + part of speech + language
-        meta_line = _format_phonetic_line(content)
-        draw.text((MARGIN_X, y), meta_line, font=font_meta, fill=COLOR_TEXT)
-        y += _line_height(font_meta) + 36
-
-        # 4) Subtle horizontal rule
+        # 3) Subtle horizontal rule
         draw.line(
             (MARGIN_X, y, CANVAS_WIDTH - MARGIN_X, y),
             fill=COLOR_LINE,
@@ -1113,7 +852,7 @@ def create_post_image(content: PostContent) -> Path:
         )
         y += 32
 
-        # 5) Definition — lowercase, wrapped
+        # 4) Definition — lowercase, wrapped
         _draw_left_text(
             draw,
             MARGIN_X,
@@ -1126,7 +865,7 @@ def create_post_image(content: PostContent) -> Path:
             lowercase=True,
         )
 
-        # 6) Bottom-left watermark
+        # 5) Bottom-left watermark
         draw.text(
             (MARGIN_X, CANVAS_HEIGHT - 100),
             WATERMARK_TEXT,
