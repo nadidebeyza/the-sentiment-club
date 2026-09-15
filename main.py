@@ -932,7 +932,12 @@ def upload_to_github_pages(image_path: Path) -> str:
     owner = github_repo.split("/")[0]
     repo_name = github_repo.split("/")[1]
     
-    logger.info("Uploading image to GitHub Pages...")
+    # Generate unique filename with timestamp to avoid caching
+    timestamp = int(datetime.now(timezone.utc).timestamp())
+    base_name = image_path.stem  # e.g., "final_post"
+    unique_filename = f"{base_name}_{timestamp}.jpg"
+    
+    logger.info("Uploading image to GitHub Pages as %s...", unique_filename)
     
     original_branch = None
     temp_image = None
@@ -944,7 +949,7 @@ def upload_to_github_pages(image_path: Path) -> str:
         )
         original_branch = original_branch_result.stdout.strip()
         
-        temp_image = Path("/tmp") / image_path.name
+        temp_image = Path("/tmp") / unique_filename
         shutil.copy2(image_path, temp_image)
         
         # Remove local file to avoid checkout conflict
@@ -977,15 +982,15 @@ def upload_to_github_pages(image_path: Path) -> str:
             Path("index.html").write_text("<html><body>Image hosting for Instagram</body></html>")
             subprocess.run(["git", "add", "index.html"], capture_output=True, text=True, check=True)
         
-        shutil.copy2(temp_image, Path(image_path.name))
+        shutil.copy2(temp_image, Path(unique_filename))
         
         subprocess.run(
-            ["git", "add", image_path.name],
+            ["git", "add", unique_filename],
             capture_output=True, text=True, check=True
         )
         
         commit_result = subprocess.run(
-            ["git", "commit", "-m", f"Update {image_path.name} [{datetime.now(timezone.utc).isoformat()}]"],
+            ["git", "commit", "-m", f"Add {unique_filename}"],
             capture_output=True, text=True
         )
         
@@ -999,7 +1004,7 @@ def upload_to_github_pages(image_path: Path) -> str:
             capture_output=True, text=True, check=True
         )
         
-        url = f"https://{owner}.github.io/{repo_name}/{image_path.name}"
+        url = f"https://{owner}.github.io/{repo_name}/{unique_filename}"
         logger.info("[✓] Hosted at GitHub Pages — %s", url)
         
         logger.info("Waiting 10 seconds for GitHub Pages deployment...")
