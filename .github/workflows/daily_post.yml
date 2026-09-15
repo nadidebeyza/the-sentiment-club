@@ -36,12 +36,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Restore word history cache
-        uses: actions/cache/restore@v5
-        with:
-          path: word_history.json
-          key: word-history-${{ github.ref_name }}
-
       - name: Set up Python 3.10
         uses: actions/setup-python@v6
         with:
@@ -68,16 +62,14 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: python main.py
 
-      - name: Save word history cache
-        uses: actions/cache/save@v5
-        if: always()
-        with:
-          path: word_history.json
-          key: word-history-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Commit word history
+        run: |
+          git add word_history.json || true
+          git commit -m "Update word history [post]" || true
+          git push || true
 
   run-story:
     needs: [run-post]
-    # Run even if run-post was skipped (for scheduled story or story_only)
     if: >
       always() && (
         github.event.schedule == '0 7 * * *' || 
@@ -91,11 +83,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Restore word history cache
-        uses: actions/cache/restore@v5
-        with:
-          path: word_history.json
-          key: word-history-${{ github.ref_name }}
+      - name: Pull latest changes
+        run: git pull origin ${{ github.ref_name }} || true
 
       - name: Set up Python 3.10
         uses: actions/setup-python@v6
@@ -123,9 +112,8 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: python story.py
 
-      - name: Save word history cache
-        uses: actions/cache/save@v5
-        if: always()
-        with:
-          path: word_history.json
-          key: word-history-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Commit word history
+        run: |
+          git add word_history.json || true
+          git commit -m "Update word history [story]" || true
+          git push || true
