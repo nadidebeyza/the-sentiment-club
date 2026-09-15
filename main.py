@@ -1007,9 +1007,34 @@ def upload_to_github_pages(image_path: Path) -> str:
         url = f"https://{owner}.github.io/{repo_name}/{unique_filename}"
         logger.info("[✓] Hosted at GitHub Pages — %s", url)
         
-        logger.info("Waiting 10 seconds for GitHub Pages deployment...")
-        time.sleep(10)
+        # Wait for GitHub Pages deployment and verify URL is accessible
+        logger.info("Waiting for GitHub Pages deployment (max 90 seconds)...")
+        max_wait = 90
+        check_interval = 5
+        elapsed = 0
         
+        while elapsed < max_wait:
+            time.sleep(check_interval)
+            elapsed += check_interval
+            
+            try:
+                response = requests.head(url, timeout=10, allow_redirects=True)
+                content_type = response.headers.get("Content-Type", "")
+                
+                if response.status_code == 200 and "image" in content_type.lower():
+                    logger.info("[✓] URL verified accessible after %d seconds", elapsed)
+                    return url
+                elif response.status_code == 200:
+                    logger.info("URL accessible but Content-Type is '%s', waiting...", content_type)
+                else:
+                    logger.info("URL not ready yet (status %d), waiting... (%ds/%ds)", 
+                               response.status_code, elapsed, max_wait)
+            except requests.RequestException as e:
+                logger.info("URL not accessible yet (%s), waiting... (%ds/%ds)", 
+                           str(e)[:50], elapsed, max_wait)
+        
+        # If we get here, deployment took too long but let's try anyway
+        logger.warning("GitHub Pages deployment took longer than expected, proceeding anyway...")
         return url
         
     except subprocess.CalledProcessError as exc:
