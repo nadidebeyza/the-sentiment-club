@@ -947,6 +947,10 @@ def upload_to_github_pages(image_path: Path) -> str:
         temp_image = Path("/tmp") / image_path.name
         shutil.copy2(image_path, temp_image)
         
+        # Remove local file to avoid checkout conflict
+        if image_path.exists():
+            image_path.unlink()
+        
         branch_check = subprocess.run(
             ["git", "ls-remote", "--heads", "origin", "gh-pages"],
             capture_output=True, text=True
