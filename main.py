@@ -919,66 +919,103 @@ def _verify_public_image_url(url: str) -> bool:
     return False
 
 
-def upload_to_github(image_path: Path) -> str:
-    """Upload image to GitHub repo and return raw URL — no external dependencies."""
+def upload_to_github_pages(image_path: Path) -> str:
+    """Upload image to GitHub Pages (gh-pages branch) and return public URL."""
     import subprocess
+    import shutil
     
     github_repo = os.getenv("GITHUB_REPOSITORY")
-    github_ref = os.getenv("GITHUB_REF_NAME", "main")
     
     if not github_repo:
         raise RuntimeError("GITHUB_REPOSITORY not set (not running in GitHub Actions?)")
     
-    logger.info("Uploading image to GitHub repository...")
+    owner = github_repo.split("/")[0]
+    repo_name = github_repo.split("/")[1]
+    
+    logger.info("Uploading image to GitHub Pages...")
+    
+    original_branch = None
+    temp_image = None
     
     try:
+        original_branch_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, check=True
+        )
+        original_branch = original_branch_result.stdout.strip()
+        
+        temp_image = Path("/tmp") / image_path.name
+        shutil.copy2(image_path, temp_image)
+        
+        branch_check = subprocess.run(
+            ["git", "ls-remote", "--heads", "origin", "gh-pages"],
+            capture_output=True, text=True
+        )
+        
+        if branch_check.stdout.strip():
+            subprocess.run(
+                ["git", "fetch", "origin", "gh-pages"],
+                capture_output=True, text=True, check=True
+            )
+            subprocess.run(
+                ["git", "checkout", "gh-pages"],
+                capture_output=True, text=True, check=True
+            )
+        else:
+            subprocess.run(
+                ["git", "checkout", "--orphan", "gh-pages"],
+                capture_output=True, text=True, check=True
+            )
+            subprocess.run(
+                ["git", "rm", "-rf", "."],
+                capture_output=True, text=True
+            )
+            Path("index.html").write_text("<html><body>Image hosting for Instagram</body></html>")
+            subprocess.run(["git", "add", "index.html"], capture_output=True, text=True, check=True)
+        
+        shutil.copy2(temp_image, Path(image_path.name))
+        
         subprocess.run(
-            ["git", "add", str(image_path)],
-            check=True,
-            capture_output=True,
-            text=True,
+            ["git", "add", image_path.name],
+            capture_output=True, text=True, check=True
         )
         
         commit_result = subprocess.run(
-            ["git", "commit", "-m", f"Auto-update: {image_path.name} [{datetime.now(timezone.utc).isoformat()}]"],
-            capture_output=True,
-            text=True,
+            ["git", "commit", "-m", f"Update {image_path.name} [{datetime.now(timezone.utc).isoformat()}]"],
+            capture_output=True, text=True
         )
-        
-        if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stdout:
-            raise RuntimeError(f"Git commit failed: {commit_result.stderr}")
         
         subprocess.run(
-            ["git", "push"],
-            check=True,
-            capture_output=True,
-            text=True,
+            ["git", "push", "-u", "origin", "gh-pages"],
+            capture_output=True, text=True, check=True
         )
         
-        sha_result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
+        subprocess.run(
+            ["git", "checkout", original_branch],
+            capture_output=True, text=True, check=True
         )
-        commit_sha = sha_result.stdout.strip()
         
-        url = f"https://raw.githubusercontent.com/{github_repo}/{commit_sha}/{image_path.name}"
-        logger.info("[✓] Hosted at GitHub — %s", url)
+        url = f"https://{owner}.github.io/{repo_name}/{image_path.name}"
+        logger.info("[✓] Hosted at GitHub Pages — %s", url)
         
-        logger.info("Waiting 5 seconds for GitHub CDN propagation...")
-        time.sleep(5)
+        logger.info("Waiting 10 seconds for GitHub Pages deployment...")
+        time.sleep(10)
         
         return url
         
     except subprocess.CalledProcessError as exc:
-        logger.exception("GitHub upload failed: %s", exc.stderr if hasattr(exc, 'stderr') else str(exc))
-        raise RuntimeError("GitHub upload failed") from exc
+        logger.exception("GitHub Pages upload failed: %s", getattr(exc, 'stderr', str(exc)))
+        if original_branch:
+            subprocess.run(["git", "checkout", original_branch], capture_output=True, text=True)
+        raise RuntimeError("GitHub Pages upload failed") from exc
+    finally:
+        if temp_image and temp_image.exists():
+            temp_image.unlink()
 
 
 def host_image(image_path: Path) -> str:
-    """Upload image to GitHub and return direct URL for Instagram."""
-    return upload_to_github(image_path)
+    """Upload image to GitHub Pages and return direct URL for Instagram."""
+    return upload_to_github_pages(image_path)
 
 
 # ---------------------------------------------------------------------------
