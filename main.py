@@ -1008,9 +1008,9 @@ def upload_to_github_pages(image_path: Path) -> str:
         logger.info("[✓] Hosted at GitHub Pages — %s", url)
         
         # Wait for GitHub Pages deployment and verify URL is accessible
-        logger.info("Waiting for GitHub Pages deployment (max 90 seconds)...")
-        max_wait = 90
-        check_interval = 5
+        logger.info("Waiting for GitHub Pages deployment (max 10 minutes)...")
+        max_wait = 600  # 10 minutes
+        check_interval = 15
         elapsed = 0
         
         while elapsed < max_wait:
