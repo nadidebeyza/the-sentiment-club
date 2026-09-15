@@ -978,10 +978,7 @@ def upload_to_github(image_path: Path) -> str:
 
 def host_image(image_path: Path) -> str:
     """Upload image to GitHub and return direct URL for Instagram."""
-    url = upload_to_github(image_path)
-    if not _verify_public_image_url(url):
-        raise RuntimeError(f"GitHub URL not accessible: {url}")
-    return url
+    return upload_to_github(image_path)
 
 
 # ---------------------------------------------------------------------------
