@@ -3,7 +3,5 @@
 __pycache__/
 .venv/
 venv/
-final_post.jpg
-final_story.jpg
 word_history.json
 *.log
