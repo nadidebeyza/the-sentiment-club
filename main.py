@@ -50,7 +50,6 @@ GEMINI_FALLBACK_MODELS = [
 INSTAGRAM_ACCOUNT_ID = os.getenv("INSTAGRAM_ACCOUNT_ID")
 INSTAGRAM_ACCESS_TOKEN = os.getenv("INSTAGRAM_ACCESS_TOKEN")
 FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "1296052766920644")
-IMGUR_CLIENT_ID = os.getenv("IMGUR_CLIENT_ID")
 
 GRAPH_API_VERSION = "v26.0"
 GRAPH_API_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
@@ -920,78 +919,69 @@ def _verify_public_image_url(url: str) -> bool:
     return False
 
 
-def upload_to_litterbox(image_path: Path) -> str:
-    """Upload to Litterbox — direct files.catbox.moe-style JPEG URL for Instagram."""
-    logger.info("Uploading image to Litterbox...")
-    headers = {"User-Agent": BROWSER_USER_AGENT}
+def upload_to_github(image_path: Path) -> str:
+    """Upload image to GitHub repo and return raw URL — no external dependencies."""
+    import subprocess
+    
+    github_repo = os.getenv("GITHUB_REPOSITORY")
+    github_ref = os.getenv("GITHUB_REF_NAME", "main")
+    
+    if not github_repo:
+        raise RuntimeError("GITHUB_REPOSITORY not set (not running in GitHub Actions?)")
+    
+    logger.info("Uploading image to GitHub repository...")
+    
     try:
-        with image_path.open("rb") as handle:
-            response = requests.post(
-                "https://litterbox.catbox.moe/resources/internals/api.php",
-                data={"reqtype": "fileupload", "time": "24h"},
-                files={"fileToUpload": (image_path.name, handle, "image/jpeg")},
-                headers=headers,
-                timeout=60,
-            )
-        response.raise_for_status()
-        url = response.text.strip()
-        if not url.startswith("https://"):
-            raise ValueError(f"Unexpected Litterbox response: {url[:200]}")
-        logger.info("[✓] Hosted at Litterbox — %s", url)
+        subprocess.run(
+            ["git", "add", str(image_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        
+        commit_result = subprocess.run(
+            ["git", "commit", "-m", f"Auto-update: {image_path.name} [{datetime.now(timezone.utc).isoformat()}]"],
+            capture_output=True,
+            text=True,
+        )
+        
+        if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stdout:
+            raise RuntimeError(f"Git commit failed: {commit_result.stderr}")
+        
+        subprocess.run(
+            ["git", "push"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        
+        sha_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        commit_sha = sha_result.stdout.strip()
+        
+        url = f"https://raw.githubusercontent.com/{github_repo}/{commit_sha}/{image_path.name}"
+        logger.info("[✓] Hosted at GitHub — %s", url)
+        
+        logger.info("Waiting 5 seconds for GitHub CDN propagation...")
+        time.sleep(5)
+        
         return url
-    except (requests.RequestException, ValueError) as exc:
-        logger.exception("Litterbox upload failed")
-        raise RuntimeError("Litterbox upload failed") from exc
-
-
-def upload_to_catbox(image_path: Path) -> str:
-    """Fallback upload to catbox.moe with browser User-Agent."""
-    logger.info("Uploading image to Catbox...")
-    headers = {"User-Agent": BROWSER_USER_AGENT}
-    try:
-        with image_path.open("rb") as handle:
-            response = requests.post(
-                "https://catbox.moe/user/api.php",
-                data={"reqtype": "fileupload"},
-                files={"fileToUpload": (image_path.name, handle, "image/jpeg")},
-                headers=headers,
-                timeout=60,
-            )
-        response.raise_for_status()
-        url = response.text.strip()
-        if not url.startswith("https://"):
-            raise ValueError(f"Unexpected Catbox response: {url[:200]}")
-        logger.info("[✓] Hosted at Catbox — %s", url)
-        return url
-    except (requests.RequestException, ValueError) as exc:
-        logger.exception("Catbox upload failed")
-        raise RuntimeError("Catbox upload failed") from exc
+        
+    except subprocess.CalledProcessError as exc:
+        logger.exception("GitHub upload failed: %s", exc.stderr if hasattr(exc, 'stderr') else str(exc))
+        raise RuntimeError("GitHub upload failed") from exc
 
 
 def host_image(image_path: Path) -> str:
-    """Upload and return an Instagram-compatible direct image URL."""
-    uploaders: list[tuple[str, Any]] = [
-        ("Catbox", upload_to_catbox),
-        ("Litterbox", upload_to_litterbox),
-    ]
-    errors: list[str] = []
-
-    for name, upload in uploaders:
-        try:
-            url = upload(image_path)
-            if _verify_public_image_url(url):
-                return url
-            logger.warning(
-                "%s URL is not a direct image (Instagram would reject it): %s",
-                name,
-                url,
-            )
-            errors.append(f"{name}: URL does not serve image/* content-type")
-        except RuntimeError as exc:
-            errors.append(f"{name}: {exc}")
-            logger.warning("%s failed — trying next host...", name)
-
-    raise RuntimeError("All image hosts failed — " + "; ".join(errors))
+    """Upload image to GitHub and return direct URL for Instagram."""
+    url = upload_to_github(image_path)
+    if not _verify_public_image_url(url):
+        raise RuntimeError(f"GitHub URL not accessible: {url}")
+    return url
 
 
 # ---------------------------------------------------------------------------
