@@ -990,7 +990,7 @@ def upload_to_github_pages(image_path: Path) -> str:
         )
         
         subprocess.run(
-            ["git", "push", "-u", "origin", "gh-pages"],
+            ["git", "push", "-f", "origin", "gh-pages"],
             capture_output=True, text=True, check=True
         )
         
