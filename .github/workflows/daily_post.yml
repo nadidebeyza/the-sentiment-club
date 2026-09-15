@@ -8,63 +8,26 @@ on:
     - cron: '0 17 * * *'
 
   workflow_dispatch:
+    inputs:
+      run_type:
+        description: 'What to run'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - post_only
+          - story_only
 
 concurrency:
   group: sentiment-club-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  run-story:
-    if: github.event.schedule == '0 7 * * *' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Restore word history cache
-        uses: actions/cache/restore@v5
-        with:
-          path: word_history.json
-          key: word-history-${{ github.ref_name }}
-
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.10'
-
-      - name: Install dependencies & fonts
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk
-          python -m pip install --upgrade pip
-          pip install google-genai pillow requests python-dotenv
-
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Run Story Automation
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
-          INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-        run: python story.py
-
-      - name: Save word history cache
-        uses: actions/cache/save@v5
-        if: always()
-        with:
-          path: word_history.json
-          key: word-history-${{ github.ref_name }}
-
   run-post:
-    if: github.event.schedule == '0 17 * * *' || github.event_name == 'workflow_dispatch'
+    if: >
+      github.event.schedule == '0 17 * * *' || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_type != 'story_only')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -110,4 +73,59 @@ jobs:
         if: always()
         with:
           path: word_history.json
+          key: word-history-${{ github.ref_name }}-${{ github.run_id }}
+
+  run-story:
+    needs: [run-post]
+    # Run even if run-post was skipped (for scheduled story or story_only)
+    if: >
+      always() && (
+        github.event.schedule == '0 7 * * *' || 
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.run_type != 'post_only')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Restore word history cache
+        uses: actions/cache/restore@v5
+        with:
+          path: word_history.json
           key: word-history-${{ github.ref_name }}
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies & fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+          python -m pip install --upgrade pip
+          pip install google-genai pillow requests python-dotenv
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Run Story Automation
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+          INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: python story.py
+
+      - name: Save word history cache
+        uses: actions/cache/save@v5
+        if: always()
+        with:
+          path: word_history.json
+          key: word-history-${{ github.ref_name }}-${{ github.run_id }}
