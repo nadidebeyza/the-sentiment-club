@@ -58,6 +58,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
           INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+          FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
+          BRAND_NAME: ${{ secrets.BRAND_NAME }}
+          WATERMARK_TEXT: ${{ secrets.WATERMARK_TEXT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: python main.py
@@ -108,6 +111,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
           INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+          FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
+          BRAND_NAME: ${{ secrets.BRAND_NAME }}
+          WATERMARK_TEXT: ${{ secrets.WATERMARK_TEXT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: python story.py

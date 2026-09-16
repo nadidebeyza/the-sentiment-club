@@ -49,7 +49,7 @@ GEMINI_FALLBACK_MODELS = [
 ]
 INSTAGRAM_ACCOUNT_ID = os.getenv("INSTAGRAM_ACCOUNT_ID")
 INSTAGRAM_ACCESS_TOKEN = os.getenv("INSTAGRAM_ACCESS_TOKEN")
-FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "1296052766920644")
+FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "")
 
 GRAPH_API_VERSION = "v26.0"
 GRAPH_API_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
@@ -80,7 +80,7 @@ FONT_DISPLAY_PATHS = (
     BASE_DIR / "foda-display.ttf",
     BASE_DIR / "font-display.ttf",
 )
-WATERMARK_TEXT = "@thesentimentclub.co"
+WATERMARK_TEXT = os.getenv("WATERMARK_TEXT", "@yourbrand")
 WATERMARK_FONT_SIZE = 38
 
 POLL_INTERVAL_SECONDS = 5
@@ -145,7 +145,9 @@ MACRON_TO_ASCII = str.maketrans("āēīōūĀĒĪŌŪ", "aeiouAEIOU")
 HEADWORD_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 IPA_QUALITY_MARKERS = frozenset("ːˈˌɑæəɚɜɪɔʊʌθðʃʒŋɲɴɡᵻɾɰ")
 
-GEMINI_SYSTEM_PROMPT = """You are the creative director for @thesentimentclub — an Instagram brand
+BRAND_NAME = os.getenv("BRAND_NAME", "yourbrand")
+
+GEMINI_SYSTEM_PROMPT = f"""You are the creative director for @{BRAND_NAME} — an Instagram brand
 that explores philosophy, deep Japanese concepts, psychology, and the hidden
 nuances of language.
 
