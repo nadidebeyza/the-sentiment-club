@@ -2,8 +2,8 @@ name: Daily Instagram Automation (Post & Story)
 
 on:
   schedule:
-    # 1. Her gün UTC 07:00 (Türkiye saati 10:00) -> Story
-    - cron: '0 7 * * *'
+    # 1. Her gün UTC 11:00 (Türkiye saati 14:00) -> Story
+    - cron: '0 11 * * *'
     # 2. Her gün UTC 17:00 (Türkiye saati 20:00) -> Feed Post
     - cron: '0 17 * * *'
 
@@ -75,7 +75,7 @@ jobs:
     needs: [run-post]
     if: >
       always() && (
-        github.event.schedule == '0 7 * * *' || 
+        github.event.schedule == '0 11 * * *' || 
         (github.event_name == 'workflow_dispatch' && github.event.inputs.run_type != 'post_only')
       )
     runs-on: ubuntu-latest
