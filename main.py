@@ -36,11 +36,17 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 GEMINI_MAX_RETRIES = int(os.getenv("GEMINI_MAX_RETRIES", "4"))
 GEMINI_RETRY_BASE_SECONDS = int(os.getenv("GEMINI_RETRY_BASE_SECONDS", "5"))
 MODELS_TO_TRY = [
+    # Preferred quality tier — these 503 under load, so the retry loop matters.
     "gemini-3.6-flash",
+    "gemini-3.7-flash",
+    "gemini-3.8-flash",
     "gemini-3.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-pro",
+    "gemini-3-flash-preview",
+    "gemini-flash-latest",
+    # Lite tier — lower demand, keeps the pipeline alive during a 503 storm.
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-lite-latest",
 ]
 RETRY_ON_503_MAX = 3
 RETRY_ON_503_DELAY = 45  # seconds
