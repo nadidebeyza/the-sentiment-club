@@ -38,7 +38,12 @@ GEMINI_RETRY_BASE_SECONDS = int(os.getenv("GEMINI_RETRY_BASE_SECONDS", "5"))
 MODELS_TO_TRY = [
     "gemini-3.6-flash",
     "gemini-3.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
 ]
+RETRY_ON_503_MAX = 3
+RETRY_ON_503_DELAY = 45  # seconds
 GEMINI_FALLBACK_MODELS = [
     model.strip()
     for model in os.getenv(
@@ -525,7 +530,7 @@ def build_gemini_prompt(history: list[dict[str, str]], *, duplicate_retry: bool 
 
 
 def _call_gemini_for_content(client: genai.Client, prompt: str) -> PostContent:
-    """Try Gemini models sequentially until one succeeds."""
+    """Try Gemini models sequentially until one succeeds, with 503 retry logic."""
     config = types.GenerateContentConfig(
         temperature=0.9,
         response_mime_type="application/json",
@@ -534,19 +539,24 @@ def _call_gemini_for_content(client: genai.Client, prompt: str) -> PostContent:
     last_error: Exception | None = None
 
     for model in _gemini_models_to_try():
-        try:
-            logger.info("Attempting content generation with model: %s", model)
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt,
-                config=config,
-            )
-            raw = response.text
-            if not raw:
-                raise ValueError("Gemini returned an empty response")
-            data = json.loads(raw)
-            content = PostContent.from_dict(data)
-            return content
+        # Retry loop for 503 errors on each model
+        for retry_attempt in range(RETRY_ON_503_MAX + 1):
+            try:
+                if retry_attempt > 0:
+                    logger.info("Retry attempt %d/%d for model: %s", retry_attempt, RETRY_ON_503_MAX, model)
+                else:
+                    logger.info("Attempting content generation with model: %s", model)
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=config,
+                )
+                raw = response.text
+                if not raw:
+                    raise ValueError("Gemini returned an empty response")
+                data = json.loads(raw)
+                content = PostContent.from_dict(data)
+                return content
         except json.JSONDecodeError as exc:
             logger.warning(
                 "Model %s returned invalid JSON (%s). Trying next fallback model...",
@@ -554,6 +564,7 @@ def _call_gemini_for_content(client: genai.Client, prompt: str) -> PostContent:
                 exc,
             )
             last_error = exc
+            break  # Move to next model
         except ValueError as exc:
             if "Invalid headword" in str(exc) or "Expected 15 hashtags" in str(exc):
                 logger.warning(
@@ -562,7 +573,7 @@ def _call_gemini_for_content(client: genai.Client, prompt: str) -> PostContent:
                     exc,
                 )
                 last_error = exc
-                continue
+                break  # Move to next model
             raise
         except genai.errors.ClientError as exc:
             if _is_invalid_gemini_api_key_error(exc):
@@ -577,13 +588,24 @@ def _call_gemini_for_content(client: genai.Client, prompt: str) -> PostContent:
                 exc,
             )
             last_error = exc
+            break  # Move to next model
         except genai.errors.ServerError as exc:
+            error_str = str(exc)
+            is_503 = "503" in error_str or "UNAVAILABLE" in error_str
+            if is_503 and retry_attempt < RETRY_ON_503_MAX:
+                logger.warning(
+                    "Model %s returned 503 (attempt %d/%d). Waiting %ds before retry...",
+                    model, retry_attempt + 1, RETRY_ON_503_MAX, RETRY_ON_503_DELAY
+                )
+                time.sleep(RETRY_ON_503_DELAY)
+                continue  # Retry same model
             logger.warning(
                 "Model %s failed (%s). Trying next fallback model...",
                 model,
                 exc,
             )
             last_error = exc
+            break  # Move to next model
         except Exception as exc:
             logger.warning(
                 "Model %s failed (%s). Trying next fallback model...",
@@ -591,6 +613,7 @@ def _call_gemini_for_content(client: genai.Client, prompt: str) -> PostContent:
                 exc,
             )
             last_error = exc
+            break  # Move to next model
 
     raise RuntimeError(
         "All Gemini models failed. Wait and retry, or adjust "
