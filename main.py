@@ -557,63 +557,63 @@ def _call_gemini_for_content(client: genai.Client, prompt: str) -> PostContent:
                 data = json.loads(raw)
                 content = PostContent.from_dict(data)
                 return content
-        except json.JSONDecodeError as exc:
-            logger.warning(
-                "Model %s returned invalid JSON (%s). Trying next fallback model...",
-                model,
-                exc,
-            )
-            last_error = exc
-            break  # Move to next model
-        except ValueError as exc:
-            if "Invalid headword" in str(exc) or "Expected 15 hashtags" in str(exc):
+            except json.JSONDecodeError as exc:
                 logger.warning(
-                    "Model %s content validation failed (%s). Trying next fallback model...",
+                    "Model %s returned invalid JSON (%s). Trying next fallback model...",
                     model,
                     exc,
                 )
                 last_error = exc
                 break  # Move to next model
-            raise
-        except genai.errors.ClientError as exc:
-            if _is_invalid_gemini_api_key_error(exc):
-                raise RuntimeError(
-                    "Invalid GEMINI_API_KEY. Create a key at "
-                    "https://aistudio.google.com/apikey (starts with 'AIza') "
-                    "and set it in your .env file."
-                ) from exc
-            logger.warning(
-                "Model %s failed (%s). Trying next fallback model...",
-                model,
-                exc,
-            )
-            last_error = exc
-            break  # Move to next model
-        except genai.errors.ServerError as exc:
-            error_str = str(exc)
-            is_503 = "503" in error_str or "UNAVAILABLE" in error_str
-            if is_503 and retry_attempt < RETRY_ON_503_MAX:
+            except ValueError as exc:
+                if "Invalid headword" in str(exc) or "Expected 15 hashtags" in str(exc):
+                    logger.warning(
+                        "Model %s content validation failed (%s). Trying next fallback model...",
+                        model,
+                        exc,
+                    )
+                    last_error = exc
+                    break  # Move to next model
+                raise
+            except genai.errors.ClientError as exc:
+                if _is_invalid_gemini_api_key_error(exc):
+                    raise RuntimeError(
+                        "Invalid GEMINI_API_KEY. Create a key at "
+                        "https://aistudio.google.com/apikey (starts with 'AIza') "
+                        "and set it in your .env file."
+                    ) from exc
                 logger.warning(
-                    "Model %s returned 503 (attempt %d/%d). Waiting %ds before retry...",
-                    model, retry_attempt + 1, RETRY_ON_503_MAX, RETRY_ON_503_DELAY
+                    "Model %s failed (%s). Trying next fallback model...",
+                    model,
+                    exc,
                 )
-                time.sleep(RETRY_ON_503_DELAY)
-                continue  # Retry same model
-            logger.warning(
-                "Model %s failed (%s). Trying next fallback model...",
-                model,
-                exc,
-            )
-            last_error = exc
-            break  # Move to next model
-        except Exception as exc:
-            logger.warning(
-                "Model %s failed (%s). Trying next fallback model...",
-                model,
-                exc,
-            )
-            last_error = exc
-            break  # Move to next model
+                last_error = exc
+                break  # Move to next model
+            except genai.errors.ServerError as exc:
+                error_str = str(exc)
+                is_503 = "503" in error_str or "UNAVAILABLE" in error_str
+                if is_503 and retry_attempt < RETRY_ON_503_MAX:
+                    logger.warning(
+                        "Model %s returned 503 (attempt %d/%d). Waiting %ds before retry...",
+                        model, retry_attempt + 1, RETRY_ON_503_MAX, RETRY_ON_503_DELAY
+                    )
+                    time.sleep(RETRY_ON_503_DELAY)
+                    continue  # Retry same model
+                logger.warning(
+                    "Model %s failed (%s). Trying next fallback model...",
+                    model,
+                    exc,
+                )
+                last_error = exc
+                break  # Move to next model
+            except Exception as exc:
+                logger.warning(
+                    "Model %s failed (%s). Trying next fallback model...",
+                    model,
+                    exc,
+                )
+                last_error = exc
+                break  # Move to next model
 
     raise RuntimeError(
         "All Gemini models failed. Wait and retry, or adjust "
