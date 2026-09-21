@@ -19,12 +19,13 @@ on:
           - post_only
           - story_only
 
-concurrency:
-  group: sentiment-club-${{ github.ref_name }}
-  cancel-in-progress: false
-
 jobs:
   run-post:
+    # Separate group per pipeline: a delayed story run must not make GitHub drop
+    # the post run, and vice versa. Scheduled crons are often hours late.
+    concurrency:
+      group: sentiment-club-post-${{ github.ref_name }}
+      cancel-in-progress: false
     if: >
       github.event.schedule == '0 17 * * *' || 
       (github.event_name == 'workflow_dispatch' && github.event.inputs.run_type != 'story_only')
@@ -67,17 +68,38 @@ jobs:
 
       - name: Commit word history
         run: |
-          git add word_history.json || true
-          git commit -m "Update word history [post]" || true
-          git push || true
+          git add word_history.json
+          if git diff --cached --quiet; then
+            echo "word_history.json unchanged — nothing to commit"
+            exit 0
+          fi
+          git commit -m "Update word history [post]"
+          for attempt in 1 2 3 4 5; do
+            if git push origin "$GITHUB_REF_NAME"; then
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt/5) — merging with origin/$GITHUB_REF_NAME"
+            cp word_history.json "$RUNNER_TEMP/ours.json"
+            git fetch origin "$GITHUB_REF_NAME"
+            git reset --hard "origin/$GITHUB_REF_NAME"
+            python main.py --merge-history "$RUNNER_TEMP/ours.json"
+            git add word_history.json
+            if git diff --cached --quiet; then
+              echo "Our concepts are already upstream — nothing left to push"
+              exit 0
+            fi
+            git commit -m "Update word history [post]"
+          done
+          echo "::error::Could not push word_history.json after 5 attempts"
+          exit 1
 
   run-story:
-    needs: [run-post]
+    concurrency:
+      group: sentiment-club-story-${{ github.ref_name }}
+      cancel-in-progress: false
     if: >
-      always() && (
-        github.event.schedule == '0 11 * * *' || 
-        (github.event_name == 'workflow_dispatch' && github.event.inputs.run_type != 'post_only')
-      )
+      github.event.schedule == '0 11 * * *' || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_type != 'post_only')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -120,6 +142,27 @@ jobs:
 
       - name: Commit word history
         run: |
-          git add word_history.json || true
-          git commit -m "Update word history [story]" || true
-          git push || true
+          git add word_history.json
+          if git diff --cached --quiet; then
+            echo "word_history.json unchanged — nothing to commit"
+            exit 0
+          fi
+          git commit -m "Update word history [story]"
+          for attempt in 1 2 3 4 5; do
+            if git push origin "$GITHUB_REF_NAME"; then
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt/5) — merging with origin/$GITHUB_REF_NAME"
+            cp word_history.json "$RUNNER_TEMP/ours.json"
+            git fetch origin "$GITHUB_REF_NAME"
+            git reset --hard "origin/$GITHUB_REF_NAME"
+            python main.py --merge-history "$RUNNER_TEMP/ours.json"
+            git add word_history.json
+            if git diff --cached --quiet; then
+              echo "Our concepts are already upstream — nothing left to push"
+              exit 0
+            fi
+            git commit -m "Update word history [story]"
+          done
+          echo "::error::Could not push word_history.json after 5 attempts"
+          exit 1

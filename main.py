@@ -96,6 +96,8 @@ WATERMARK_FONT_SIZE = 38
 
 POLL_INTERVAL_SECONDS = 5
 POLL_MAX_WAIT_SECONDS = 30
+GH_PAGES_PUSH_ATTEMPTS = int(os.getenv("GH_PAGES_PUSH_ATTEMPTS", "5"))
+GH_PAGES_PUSH_RETRY_SECONDS = int(os.getenv("GH_PAGES_PUSH_RETRY_SECONDS", "5"))
 WORD_HISTORY_PATH = BASE_DIR / "word_history.json"
 WORD_HISTORY_SIZE = int(os.getenv("WORD_HISTORY_SIZE", "30"))
 DUPLICATE_CONTENT_RETRIES = int(os.getenv("DUPLICATE_CONTENT_RETRIES", "5"))
@@ -513,6 +515,41 @@ def record_published_word(content: PostContent) -> None:
         min(len(history), WORD_HISTORY_SIZE),
         WORD_HISTORY_SIZE,
         content.word,
+    )
+
+
+def merge_word_history(other_path: Path) -> None:
+    """Merge another copy of the history into ours, keeping both runs' concepts.
+
+    The post and story pipelines push word_history.json independently. Because it
+    is a single rolling list, rebasing one push onto the other always conflicts,
+    which would silently drop a concept from the duplicate-avoidance list.
+    Merging by entry instead is conflict-free and order-independent.
+    """
+    ours = load_word_history()
+    try:
+        payload = json.loads(other_path.read_text(encoding="utf-8"))
+        theirs = payload.get("entries", [])
+        if not isinstance(theirs, list):
+            theirs = []
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        raise RuntimeError(f"Could not read history to merge from {other_path}") from exc
+
+    merged: dict[tuple[str, str], dict[str, str]] = {}
+    for entry in [*ours, *theirs]:
+        if not isinstance(entry, dict):
+            continue
+        key = (_normalize_headword(entry.get("word", "")), entry.get("published_at", ""))
+        merged.setdefault(key, entry)
+
+    ordered = sorted(merged.values(), key=lambda entry: entry.get("published_at", ""))
+    save_word_history(ordered)
+    logger.info(
+        "Word history merged — %s local + %s incoming = %s unique (keeping last %s)",
+        len(ours),
+        len(theirs),
+        len(ordered),
+        WORD_HISTORY_SIZE,
     )
 
 
@@ -1025,10 +1062,41 @@ def upload_to_github_pages(image_path: Path) -> str:
             capture_output=True, text=True
         )
         
-        subprocess.run(
-            ["git", "push", "-f", "origin", "gh-pages"],
-            capture_output=True, text=True, check=True
-        )
+        # The post and story pipelines can run concurrently. A force push here
+        # would drop the other run's image while Instagram is still fetching it,
+        # so rebase our commit on top of theirs and retry instead.
+        for attempt in range(1, GH_PAGES_PUSH_ATTEMPTS + 1):
+            push_result = subprocess.run(
+                ["git", "push", "origin", "gh-pages"],
+                capture_output=True, text=True
+            )
+            if push_result.returncode == 0:
+                break
+
+            if attempt == GH_PAGES_PUSH_ATTEMPTS:
+                raise RuntimeError(
+                    f"Could not push {unique_filename} to gh-pages after "
+                    f"{GH_PAGES_PUSH_ATTEMPTS} attempts: {push_result.stderr.strip()}"
+                )
+
+            logger.warning(
+                "gh-pages push rejected (attempt %d/%d) — rebasing onto origin/gh-pages",
+                attempt, GH_PAGES_PUSH_ATTEMPTS
+            )
+            subprocess.run(
+                ["git", "fetch", "origin", "gh-pages"],
+                capture_output=True, text=True, check=True
+            )
+            rebase_result = subprocess.run(
+                ["git", "rebase", "FETCH_HEAD"],
+                capture_output=True, text=True
+            )
+            if rebase_result.returncode != 0:
+                subprocess.run(["git", "rebase", "--abort"], capture_output=True, text=True)
+                raise RuntimeError(
+                    f"Could not rebase gh-pages onto origin: {rebase_result.stderr.strip()}"
+                )
+            time.sleep(GH_PAGES_PUSH_RETRY_SECONDS)
         
         subprocess.run(
             ["git", "checkout", original_branch],
@@ -1070,10 +1138,12 @@ def upload_to_github_pages(image_path: Path) -> str:
         
     except subprocess.CalledProcessError as exc:
         logger.exception("GitHub Pages upload failed: %s", getattr(exc, 'stderr', str(exc)))
-        if original_branch:
-            subprocess.run(["git", "checkout", original_branch], capture_output=True, text=True)
         raise RuntimeError("GitHub Pages upload failed") from exc
     finally:
+        # Never leave the checkout on gh-pages — the caller's next step commits
+        # word_history.json and would otherwise write it to the wrong branch.
+        if original_branch:
+            subprocess.run(["git", "checkout", original_branch], capture_output=True, text=True)
         if temp_image and temp_image.exists():
             temp_image.unlink()
 
@@ -1340,6 +1410,17 @@ def main() -> int:
         load_dotenv()
         show_word_history()
         return 0
+
+    if len(sys.argv) > 1 and sys.argv[1] == "--merge-history":
+        if len(sys.argv) < 3:
+            logger.error("--merge-history requires a path to the history file to merge")
+            return 1
+        try:
+            merge_word_history(Path(sys.argv[2]))
+            return 0
+        except RuntimeError as exc:
+            logger.error("%s", exc)
+            return 1
 
     try:
         run_pipeline()
