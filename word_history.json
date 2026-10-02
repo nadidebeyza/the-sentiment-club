@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "shoshin",
-      "subtitle": "初心",
-      "published_at": "2026-09-16T09:25:54.663227+00:00"
-    },
-    {
       "word": "komorebi",
       "subtitle": "木漏れ日",
       "published_at": "2026-09-16T15:23:13.334870+00:00"
@@ -149,6 +144,11 @@
       "word": "shinrin-yoku",
       "subtitle": "森林浴",
       "published_at": "2026-10-02T16:44:40.988198+00:00"
+    },
+    {
+      "word": "oubaitori",
+      "subtitle": "桜梅桃李",
+      "published_at": "2026-10-02T21:22:42.628642+00:00"
     }
   ]
 }
