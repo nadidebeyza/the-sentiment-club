@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "oubaitouri",
-      "subtitle": "桜梅桃李",
-      "published_at": "2026-09-16T09:22:07.566339+00:00"
-    },
-    {
       "word": "shoshin",
       "subtitle": "初心",
       "published_at": "2026-09-16T09:25:54.663227+00:00"
@@ -149,6 +144,11 @@
       "word": "shakkei",
       "subtitle": "借景",
       "published_at": "2026-10-01T21:49:32.986563+00:00"
+    },
+    {
+      "word": "shinrin-yoku",
+      "subtitle": "森林浴",
+      "published_at": "2026-10-02T16:44:40.988198+00:00"
     }
   ]
 }
