@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "komorebi",
-      "subtitle": "木漏れ日",
-      "published_at": "2026-09-16T15:23:13.334870+00:00"
-    },
-    {
       "word": "mono-no-aware",
       "subtitle": "物の哀れ",
       "published_at": "2026-09-16T19:55:27.110835+00:00"
@@ -149,6 +144,11 @@
       "word": "oubaitori",
       "subtitle": "桜梅桃李",
       "published_at": "2026-10-02T21:22:42.628642+00:00"
+    },
+    {
+      "word": "tasogare",
+      "subtitle": "黄昏",
+      "published_at": "2026-10-03T15:08:28.337010+00:00"
     }
   ]
 }
