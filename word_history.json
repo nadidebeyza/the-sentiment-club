@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "yugen",
-      "subtitle": "幽玄",
-      "published_at": "2026-09-19T19:16:29.309484+00:00"
-    },
-    {
       "word": "yutori",
       "subtitle": "ゆとり",
       "published_at": "2026-09-20T14:38:22.119352+00:00"
@@ -149,6 +144,11 @@
       "word": "komorebi",
       "subtitle": "木漏れ日",
       "published_at": "2026-10-04T15:42:52.422619+00:00"
+    },
+    {
+      "word": "ichigo-ichie",
+      "subtitle": "一期一会",
+      "published_at": "2026-10-04T20:00:03.522480+00:00"
     }
   ]
 }
