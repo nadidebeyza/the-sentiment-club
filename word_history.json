@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "yutori",
-      "subtitle": "ゆとり",
-      "published_at": "2026-09-20T14:38:22.119352+00:00"
-    },
-    {
       "word": "kintsugi",
       "subtitle": "金継ぎ",
       "published_at": "2026-09-20T19:20:49.248757+00:00"
@@ -149,6 +144,11 @@
       "word": "ichigo-ichie",
       "subtitle": "一期一会",
       "published_at": "2026-10-04T20:00:03.522480+00:00"
+    },
+    {
+      "word": "yugen",
+      "subtitle": "幽玄",
+      "published_at": "2026-10-05T23:07:54.267200+00:00"
     }
   ]
 }
