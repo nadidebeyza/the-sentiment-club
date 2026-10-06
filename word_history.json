@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "kintsugi",
-      "subtitle": "金継ぎ",
-      "published_at": "2026-09-20T19:20:49.248757+00:00"
-    },
-    {
       "word": "boketto",
       "subtitle": "ぼーっと",
       "published_at": "2026-09-21T16:52:04.185118+00:00"
@@ -149,6 +144,11 @@
       "word": "yugen",
       "subtitle": "幽玄",
       "published_at": "2026-10-05T23:07:54.267200+00:00"
+    },
+    {
+      "word": "yutori",
+      "subtitle": "余裕",
+      "published_at": "2026-10-06T17:05:38.434326+00:00"
     }
   ]
 }
