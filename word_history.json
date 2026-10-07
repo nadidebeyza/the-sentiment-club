@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "ma",
-      "subtitle": "間",
-      "published_at": "2026-09-21T21:09:14.316882+00:00"
-    },
-    {
       "word": "koi-no-yokan",
       "subtitle": "恋の予感",
       "published_at": "2026-09-22T15:40:59.424682+00:00"
@@ -149,6 +144,11 @@
       "word": "kintsugi",
       "subtitle": "金継ぎ",
       "published_at": "2026-10-07T17:52:03.877679+00:00"
+    },
+    {
+      "word": "atarayo",
+      "subtitle": "可惜夜",
+      "published_at": "2026-10-07T21:54:39.992049+00:00"
     }
   ]
 }
