@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "natsukashii",
-      "subtitle": "懐かしい",
-      "published_at": "2026-09-21T21:01:42.181384+00:00"
-    },
-    {
       "word": "ma",
       "subtitle": "間",
       "published_at": "2026-09-21T21:09:14.316882+00:00"
@@ -149,6 +144,11 @@
       "word": "shoshin",
       "subtitle": "初心",
       "published_at": "2026-10-06T21:32:30.368888+00:00"
+    },
+    {
+      "word": "kintsugi",
+      "subtitle": "金継ぎ",
+      "published_at": "2026-10-07T17:52:03.877679+00:00"
     }
   ]
 }
