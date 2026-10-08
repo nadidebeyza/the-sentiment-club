@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "ukiyo",
-      "subtitle": "浮世",
-      "published_at": "2026-09-22T20:09:01.652054+00:00"
-    },
-    {
       "word": "wabi-sabi",
       "subtitle": "侘寂",
       "published_at": "2026-09-23T15:32:15.628179+00:00"
@@ -149,6 +144,11 @@
       "word": "natsukashii",
       "subtitle": "懐かしい",
       "published_at": "2026-10-08T17:49:30.544888+00:00"
+    },
+    {
+      "word": "yoin",
+      "subtitle": "余韻",
+      "published_at": "2026-10-08T21:57:35.286503+00:00"
     }
   ]
 }
