@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "kachou-fuugetsu",
-      "subtitle": "花鳥風月",
-      "published_at": "2026-09-23T20:03:38.636073+00:00"
-    },
-    {
       "word": "gaman",
       "subtitle": "我慢",
       "published_at": "2026-09-24T15:53:30.174844+00:00"
@@ -149,6 +144,11 @@
       "word": "mono-no-aware",
       "subtitle": "物の哀れ",
       "published_at": "2026-10-09T17:26:09.641473+00:00"
+    },
+    {
+      "word": "boketto",
+      "subtitle": "ぼけっと",
+      "published_at": "2026-10-09T21:32:55.026072+00:00"
     }
   ]
 }
