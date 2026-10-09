@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "wabi-sabi",
-      "subtitle": "侘寂",
-      "published_at": "2026-09-23T15:32:15.628179+00:00"
-    },
-    {
       "word": "kachou-fuugetsu",
       "subtitle": "花鳥風月",
       "published_at": "2026-09-23T20:03:38.636073+00:00"
@@ -149,6 +144,11 @@
       "word": "yoin",
       "subtitle": "余韻",
       "published_at": "2026-10-08T21:57:35.286503+00:00"
+    },
+    {
+      "word": "mono-no-aware",
+      "subtitle": "物の哀れ",
+      "published_at": "2026-10-09T17:26:09.641473+00:00"
     }
   ]
 }
