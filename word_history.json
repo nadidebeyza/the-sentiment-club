@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "gaman",
-      "subtitle": "我慢",
-      "published_at": "2026-09-24T15:53:30.174844+00:00"
-    },
-    {
       "word": "ishin-denshin",
       "subtitle": "以心伝心",
       "published_at": "2026-09-24T20:26:32.886766+00:00"
@@ -149,6 +144,11 @@
       "word": "boketto",
       "subtitle": "ぼけっと",
       "published_at": "2026-10-09T21:32:55.026072+00:00"
+    },
+    {
+      "word": "ukiyo",
+      "subtitle": "浮世",
+      "published_at": "2026-10-10T20:32:59.752838+00:00"
     }
   ]
 }
