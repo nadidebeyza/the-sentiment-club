@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "setsunai",
-      "subtitle": "切ない",
-      "published_at": "2026-09-27T15:36:45.237897+00:00"
-    },
-    {
       "word": "seijaku",
       "subtitle": "静寂",
       "published_at": "2026-09-27T20:01:35.137605+00:00"
@@ -149,6 +144,11 @@
       "word": "ma",
       "subtitle": "間",
       "published_at": "2026-10-12T23:34:06.047610+00:00"
+    },
+    {
+      "word": "kodawari",
+      "subtitle": "こだわり",
+      "published_at": "2026-10-13T18:09:39.494726+00:00"
     }
   ]
 }
