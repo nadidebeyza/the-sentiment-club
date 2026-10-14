@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "fuubutsushi",
-      "subtitle": "風物詩",
-      "published_at": "2026-09-28T22:30:00.094272+00:00"
-    },
-    {
       "word": "zanshin",
       "subtitle": "残心",
       "published_at": "2026-09-29T17:03:33.926979+00:00"
@@ -149,6 +144,11 @@
       "word": "shin-gi-tai",
       "subtitle": "心技体",
       "published_at": "2026-10-14T16:06:22.851945+00:00"
+    },
+    {
+      "word": "seijaku",
+      "subtitle": "静寂",
+      "published_at": "2026-10-14T20:33:57.552585+00:00"
     }
   ]
 }
