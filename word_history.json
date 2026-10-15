@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "zanshin",
-      "subtitle": "残心",
-      "published_at": "2026-09-29T17:03:33.926979+00:00"
-    },
-    {
       "word": "datsuzoku",
       "subtitle": "脱俗",
       "published_at": "2026-09-29T21:19:59.918097+00:00"
@@ -149,6 +144,11 @@
       "word": "seijaku",
       "subtitle": "静寂",
       "published_at": "2026-10-14T20:33:57.552585+00:00"
+    },
+    {
+      "word": "tsundoku",
+      "subtitle": "積読",
+      "published_at": "2026-10-15T20:14:10.088321+00:00"
     }
   ]
 }
