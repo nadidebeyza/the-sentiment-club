@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "datsuzoku",
-      "subtitle": "脱俗",
-      "published_at": "2026-09-29T21:19:59.918097+00:00"
-    },
-    {
       "word": "kawaakari",
       "subtitle": "川明かり",
       "published_at": "2026-09-30T17:02:11.710169+00:00"
@@ -149,6 +144,11 @@
       "word": "tsundoku",
       "subtitle": "積読",
       "published_at": "2026-10-15T20:14:10.088321+00:00"
+    },
+    {
+      "word": "miyabi",
+      "subtitle": "雅",
+      "published_at": "2026-10-16T15:30:19.278687+00:00"
     }
   ]
 }
