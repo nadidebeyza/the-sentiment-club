@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "kawaakari",
-      "subtitle": "川明かり",
-      "published_at": "2026-09-30T17:02:11.710169+00:00"
-    },
-    {
       "word": "kizuna",
       "subtitle": "絆",
       "published_at": "2026-09-30T21:21:16.276540+00:00"
@@ -149,6 +144,11 @@
       "word": "miyabi",
       "subtitle": "雅",
       "published_at": "2026-10-16T15:30:19.278687+00:00"
+    },
+    {
+      "word": "fuubutsu-shi",
+      "subtitle": "風物詩",
+      "published_at": "2026-10-16T19:52:37.355143+00:00"
     }
   ]
 }
