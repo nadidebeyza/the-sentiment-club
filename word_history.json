@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "shinrin-yoku",
-      "subtitle": "森林浴",
-      "published_at": "2026-10-02T16:44:40.988198+00:00"
-    },
-    {
       "word": "oubaitori",
       "subtitle": "桜梅桃李",
       "published_at": "2026-10-02T21:22:42.628642+00:00"
@@ -149,6 +144,11 @@
       "word": "kizuna",
       "subtitle": "絆",
       "published_at": "2026-10-18T14:22:12.925439+00:00"
+    },
+    {
+      "word": "shakkei",
+      "subtitle": "借景",
+      "published_at": "2026-10-18T19:21:22.525105+00:00"
     }
   ]
 }
