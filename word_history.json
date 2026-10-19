@@ -1,11 +1,6 @@
 {
   "entries": [
     {
-      "word": "oubaitori",
-      "subtitle": "桜梅桃李",
-      "published_at": "2026-10-02T21:22:42.628642+00:00"
-    },
-    {
       "word": "tasogare",
       "subtitle": "黄昏",
       "published_at": "2026-10-03T15:08:28.337010+00:00"
@@ -149,6 +144,11 @@
       "word": "shakkei",
       "subtitle": "借景",
       "published_at": "2026-10-18T19:21:22.525105+00:00"
+    },
+    {
+      "word": "yohaku",
+      "subtitle": "余白",
+      "published_at": "2026-10-19T17:25:21.645213+00:00"
     }
   ]
 }
